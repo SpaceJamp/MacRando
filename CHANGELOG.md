@@ -1,5 +1,15 @@
 # MacRando Changelog
 
+## 1.6.1 - 2026.09
+
+### Fixed
+
+- **The two on-demand dialogs showed the generic Windows application icon.** The read-only report dialog, used for diagnostics, the IP preflight, and the device tracking report, and the preset editor, were both created as a bare `Form`, which WinForms fills in with `SystemIcons.Application`. They now use the MacRando icon, loaded once and shared with the dashboard so all three agree. The icon is loaded lazily and disposed with the tray context, and a failure to load it leaves the dialogs working rather than blocking the report, since the report is often the thing explaining a problem.
+
+### Verified
+
+- The fix was checked by comparing rendered pixels rather than object identity: the default form icon and the icon the dialogs now load hash differently, and a dialog with the handle created renders the same artwork as the loaded MacRando icon. Object identity alone would not have been sufficient, because a bare `Form` reports a non-null icon, which makes a naive "is it null" check look like there was nothing to fix.
+
 ## 1.6.0 - 2026.09
 
 ### Added

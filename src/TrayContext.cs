@@ -27,6 +27,10 @@ namespace MacRando
         private readonly DashboardForm _form;
         private readonly NotifyIcon _notifyIcon;
         private readonly Icon _trayIcon;
+        // Loaded on first use and kept for the life of the context: the read-only report
+        // dialog and the preset editor are both created on demand, and a bare Form shows
+        // no icon in its title bar without one.
+        private Icon _applicationIcon;
         private readonly ContextMenuStrip _menu;
         private readonly ToolStripMenuItem _publicIpMenuItem;
         private readonly ToolStripMenuItem _adaptersMenu;
@@ -168,6 +172,11 @@ namespace MacRando
                 _notifyIcon.Visible = false;
                 _notifyIcon.Dispose();
                 _trayIcon.Dispose();
+                if (_applicationIcon != null)
+                {
+                    _applicationIcon.Dispose();
+                    _applicationIcon = null;
+                }
                 if (_notificationCenterForm != null)
                 {
                     _notificationCenterForm.CloseForDispose();
@@ -1100,6 +1109,27 @@ namespace MacRando
             }
         }
 
+        private Icon ApplicationIcon
+        {
+            get
+            {
+                // Null rather than a throw: a missing icon must never stop a report from
+                // being shown, since the report is often the thing explaining a problem.
+                if (_applicationIcon == null)
+                {
+                    try
+                    {
+                        _applicationIcon = DashboardForm.LoadApplicationIcon();
+                    }
+                    catch
+                    {
+                        _applicationIcon = null;
+                    }
+                }
+                return _applicationIcon;
+            }
+        }
+
         private void ShowDiagnosticsReport(string text)
         {
             ShowReadOnlyReport("MacRando read-only diagnostics", text);
@@ -1113,6 +1143,7 @@ namespace MacRando
                 dialog.StartPosition = FormStartPosition.CenterParent;
                 dialog.Size = new Size(760, 520);
                 dialog.MinimumSize = new Size(520, 360);
+                dialog.Icon = ApplicationIcon;
                 var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(10) };
                 layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
                 layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
@@ -3009,6 +3040,7 @@ namespace MacRando
                 dialog.MinimizeBox = false;
                 dialog.MaximizeBox = false;
                 dialog.ClientSize = new Size(470, 330);
+                dialog.Icon = ApplicationIcon;
                 var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 10, Padding = new Padding(12) };
                 layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
                 layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));

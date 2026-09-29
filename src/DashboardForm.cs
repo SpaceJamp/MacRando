@@ -1608,7 +1608,11 @@ namespace MacRando
             return new Label { Text = text, AutoSize = false, AutoEllipsis = true, Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold, GraphicsUnit.Point), ForeColor = Color.FromArgb(30, 64, 175) };
         }
 
-        private static Icon LoadApplicationIcon()
+        /// <summary>
+        /// Shared so the ad-hoc dialogs in the tray context get the same icon as the
+        /// dashboard rather than the blank default a bare Form starts with.
+        /// </summary>
+        internal static Icon LoadApplicationIcon()
         {
             // Prefer the executable's embedded icon so title bars and shell
             // notifications use the same Windows-native icon resource.
