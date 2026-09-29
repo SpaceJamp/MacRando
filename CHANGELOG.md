@@ -1,5 +1,19 @@
 # MacRando Changelog
 
+## 1.3.1 - 2026.09
+
+### Fixed
+
+- The details pane is now clipped by a real scroll host. A `TableLayoutPanel` does not clip its children, so the MAC, network, and VPN cards previously drew on top of the Safety and status card on a short window, including button-on-button collisions such as *Notification center* overlapping *Randomize MAC + IP*. Content now scrolls instead of overlapping.
+- The overlap audit used for regression checks now compares controls in absolute form coordinates rather than parent-relative bounds, so a control overflowing into a different container can actually be detected. It also covers `Label` controls and parent-boundary overflow, and runs across window sizes and DPI scales of 1.25x, 1.5x, and 2.0x in both themes.
+- The release workflow now fails loudly when the release it just created does not exist, instead of reporting success after a silent no-op.
+
+### Still open
+
+The reported overlap in the adapter list area could not be reproduced. The audit reports zero overlaps in that region across 980x620, 1120x720, and 1400x900 in both themes and at 1.25x, 1.5x, and 2.0x scale. A screenshot or the names of the two overlapping elements would identify it.
+
+## 1.3.0 - 2026.09
+
 ## 1.3.0 - 2026.09
 
 ### Safety and recovery
