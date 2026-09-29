@@ -52,6 +52,20 @@ To create a versioned release archive:
 .\package.ps1
 ```
 
+For an unzipped, runnable folder that includes the public certificate and the trust helper:
+
+```powershell
+.\package.ps1 -Portable
+```
+
+To run the whole release in one command (tests, build, sign, package, manifest, checklist):
+
+```powershell
+.\release.ps1 -Version 1.3.0 -SignThumbprint <CERTIFICATE-THUMBPRINT> -Portable
+```
+
+`release.ps1` refuses to continue if the requested version does not match `AppInfo.Version`, and it verifies the compiled file version after the build so a release cannot ship a binary that reports a different version than the tag.
+
 ## Code signing
 
 `sign.ps1` applies a SHA-256 Authenticode signature to a built Windows executable. Signing is explicit; builds do not select a certificate implicitly.
@@ -117,7 +131,51 @@ An optional Inno Setup template is included at `installer.iss`.
 7. Leave DHCP IP randomization disabled unless you explicitly accept the address-conflict risk.
 8. Optional startup settings are available from the tray menu and the Safety & Status card: **Start minimized to tray**, **Start with Windows**, and **Randomize MAC on startup (risky)**. The last option is disabled by default, requires explicit confirmation, targets the selected adapter by GUID, and is skipped whenever a restore profile is already pending. When enabled, startup randomization runs immediately without a countdown, and the saved adapter configuration is restored automatically when you choose **Exit**. Startup never changes anything unless that explicit option was enabled.
 9. Open **Notification center** from the tray or Safety & Status to search recent notifications, filter by severity, copy details, open the affected adapter, or retry/restore an operation. Popup actions include **Open dashboard**, **Restore now**, **Retry**, **Diagnostics**, and **Dismiss**.
-10. Run **IP preflight (read-only)** before a live local-IP change. It reports the current and proposed address, prefix, DHCP plan, gateway route plan, DNS plan, and safety warnings without changing adapter settings.
+10. Run **IP preflight (read-only)** before a live local-IP change. It reports the current and proposed address, prefix, DHCP plan, gateway route plan, DNS plan, and a per-setting list of what would change versus what would be preserved, without changing adapter settings.
+
+## Recovery after a crash or forced termination
+
+If MacRando is killed, crashes, or loses power mid-change, the saved restore profile survives. Recover with either of these:
+
+- The **pending-restore banner** on the dashboard, which appears whenever any adapter still has a profile.
+- **Restore all pending profiles** in the tray menu. It restores each adapter one at a time and verifies the result before starting the next, then reports which adapters succeeded and which still need attention.
+
+A routine uninstall deliberately leaves restore profiles alone. See the uninstall section below.
+
+## Adapter list
+
+- **Search** filters by adapter name or hardware description.
+- **Connected only** hides disconnected adapters.
+- **Star selected** marks an adapter as a favorite. Favorites are stored per interface GUID, listed first, and shown with a star. An adapter that disappears and returns keeps its favorite status because the GUID is the key.
+- The **Adapter details** card shows the driver description, interface index, whether the driver exposes the `NetworkAddress` property, and the interface GUID MacRando uses to target the adapter.
+
+## History and diagnostics
+
+**View IP change history** in the tray menu lists recent local-IP changes with the original and proposed address, prefix, DHCP state, gateway, and outcome: applied, verified, rolled back, or failed. Addresses are masked before they are written to disk, exactly like notification history.
+
+**Export diagnostic bundle** writes a timestamped ZIP to `%LOCALAPPDATA%\MacRando\diagnostic-bundles` containing a summary, the diagnostics report, the IP preflight, notification history, IP change history, the last 400 log lines, and the license. MAC and IP addresses are masked, so a bundle is safe to attach to a bug report.
+
+## Trusting the development certificate
+
+Release builds are signed with a self-signed development certificate, so Windows shows an unknown-publisher warning until that certificate is trusted on the machine running the build.
+
+1. Export the public certificate from the tray menu: **Export signing certificate (public)**. Only the public `.cer` is written; the private key never leaves the Windows certificate store.
+2. Install it, after reading the script:
+
+```powershell
+# dry run first: prints what would happen and changes nothing
+powershell -NoProfile -ExecutionPolicy Bypass -File .\trust-certificate.ps1
+
+# trust the publisher for the current user
+powershell -NoProfile -ExecutionPolicy Bypass -File .\trust-certificate.ps1 -Install
+
+# or for every user on this machine (needs an elevated session)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\trust-certificate.ps1 -Install -Store LocalMachine
+```
+
+The script installs into `TrustedPublisher` only. It never writes to `Root`, so the certificate cannot become a general trust anchor, and it does nothing at all without `-Install`. Remove it again with `-Remove -Install`.
+
+This is a convenience for testing. Public distribution still needs an OV or EV certificate from a trusted CA, and SmartScreen reputation warnings may continue until then.
 
 ## Optional update checks
 
@@ -219,16 +277,19 @@ Unless required by applicable law or agreed to in writing, the software is provi
 - `src/NotificationPopup.cs` — non-activating in-app notifications with the application icon.
 - `src/NotificationCenterForm.cs` — searchable notification history and notification preferences.
 - `src/DashboardForm.cs` — small dashboard window.
-- `src/StateStore.cs` — DPAPI-protected persistent restore profiles and presets.
-- `src/DiagnosticsService.cs` — read-only diagnostics and IP preflight reporting.
-- `src/UpdateService.cs` — optional HTTPS manifest update checks with hash/signature verification.
 - `src/AppLogger.cs` — local, sanitized diagnostic logging.
-- `src/AppSettings.cs` — startup and display preferences.
+- `src/LicenseInfo.cs` — embedded license text and notice strings.
+- `src/StateStore.cs` — DPAPI-protected persistent restore profiles, presets, and history.
+- `src/DiagnosticsService.cs` — read-only diagnostics and IP preflight reporting with a planned-change diff.
+- `src/UpdateService.cs` — optional HTTPS manifest update checks with hash/signature verification.
+- `src/AppSettings.cs` — startup, display, notification, and adapter-view preferences.
 - `src/PowerShellRunnerService.cs` — injectable PowerShell runner boundary.
 - `assets/` — supplied multi-size application and tray icons.
 - `tools/GenerateBurgerIcons.cs` — reproducible icon generation from the supplied source image.
 - `build.ps1` — reproducible Windows build script with optional Authenticode signing.
-- `package.ps1` — versioned release archive builder with optional signing.
+- `package.ps1` — versioned release archive builder with optional signing and `-Portable` folder output.
+- `release.ps1` — one-command release: test, build, sign, package, manifest, and checklist.
+- `trust-certificate.ps1` — opt-in public-certificate trust helper for the TrustedPublisher store.
 - `publish-update.ps1` — generates and verifies the `update.json` release manifest.
 - `CHANGELOG.md` — release notes and change history.
 - `LICENSE` — Apache License 2.0.
@@ -236,4 +297,4 @@ Unless required by applicable law or agreed to in writing, the software is provi
 - `installer.iss` — optional Inno Setup installer template.
 - `.github/workflows/ci.yml` — build and mock-test checks on every push and pull request.
 - `.github/workflows/release.yml` — tag-triggered test, build, and unsigned release staging.
-- `test.ps1` / `tests` — non-network mock-provider regression tests.
+- `test.ps1` / `tests` — non-network mock-provider, settings, and upgrade-regression tests.

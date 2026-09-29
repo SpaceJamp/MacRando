@@ -20,6 +20,8 @@ namespace MacRando
         public int NotificationDurationSeconds { get; set; }
         public string UpdateManifestUrl { get; set; }
         public string ExpectedSignerThumbprint { get; set; }
+        public System.Collections.Generic.List<string> FavoriteAdapters { get; set; }
+        public bool ShowConnectedAdaptersOnly { get; set; }
 
         public AppSettings()
         {
@@ -32,6 +34,51 @@ namespace MacRando
             NotificationDurationSeconds = 5;
             UpdateManifestUrl = string.Empty;
             ExpectedSignerThumbprint = string.Empty;
+            FavoriteAdapters = new System.Collections.Generic.List<string>();
+        }
+
+        public bool IsFavorite(string adapterKey)
+        {
+            if (string.IsNullOrWhiteSpace(adapterKey) || FavoriteAdapters == null)
+            {
+                return false;
+            }
+            foreach (string key in FavoriteAdapters)
+            {
+                if (string.Equals(key, adapterKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public bool ToggleFavorite(string adapterKey)
+        {
+            if (string.IsNullOrWhiteSpace(adapterKey))
+            {
+                return false;
+            }
+            if (FavoriteAdapters == null)
+            {
+                FavoriteAdapters = new System.Collections.Generic.List<string>();
+            }
+            string existing = null;
+            foreach (string key in FavoriteAdapters)
+            {
+                if (string.Equals(key, adapterKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    existing = key;
+                    break;
+                }
+            }
+            if (existing != null)
+            {
+                FavoriteAdapters.Remove(existing);
+                return false;
+            }
+            FavoriteAdapters.Add(adapterKey.Trim());
+            return true;
         }
     }
 
@@ -90,6 +137,30 @@ namespace MacRando
             normalized.NotificationDurationSeconds = Math.Max(2, Math.Min(60, normalized.NotificationDurationSeconds));
             normalized.UpdateManifestUrl = normalized.UpdateManifestUrl ?? string.Empty;
             normalized.ExpectedSignerThumbprint = (normalized.ExpectedSignerThumbprint ?? string.Empty).Replace(" ", "").ToUpperInvariant();
+            normalized.FavoriteAdapters = NormalizeFavorites(normalized.FavoriteAdapters);
+            return normalized;
+        }
+
+        private static System.Collections.Generic.List<string> NormalizeFavorites(System.Collections.Generic.List<string> favorites)
+        {
+            var normalized = new System.Collections.Generic.List<string>();
+            var seen = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (favorites == null)
+            {
+                return normalized;
+            }
+            foreach (string key in favorites)
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+                string trimmed = key.Trim();
+                if (seen.Add(trimmed) && normalized.Count < 50)
+                {
+                    normalized.Add(trimmed);
+                }
+            }
             return normalized;
         }
 

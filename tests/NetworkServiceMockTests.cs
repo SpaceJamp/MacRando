@@ -171,21 +171,42 @@ internal static class NetworkServiceMockTests
                     NotificationQuietHoursEndHour = 6,
                     NotificationDurationSeconds = 9,
                     UpdateManifestUrl = "https://example.invalid/macrando.json",
-                    ExpectedSignerThumbprint = "0123456789ABCDEF0123456789ABCDEF01234567"
+                    ExpectedSignerThumbprint = "0123456789ABCDEF0123456789ABCDEF01234567",
+                    ShowConnectedAdaptersOnly = true,
+                    FavoriteAdapters = new System.Collections.Generic.List<string> { "{fav-1}", "{fav-1}", "  ", "{fav-2}" }
                 });
                 AppSettings settings = settingsStore.Load();
                 if (!settings.StartMinimized || settings.StartWithWindows || !settings.AutoRandomizeMacOnStartup || settings.AutoRandomizeAdapterKey != "{mock-guid}") throw new Exception("settings round-trip failed");
                 if (!settings.NotificationsEnabled || settings.NotificationSoundEnabled || !settings.NotificationCollapseDuplicates || !settings.NotificationQuietHoursEnabled || settings.NotificationQuietHoursStartHour != 21 || settings.NotificationQuietHoursEndHour != 6 || settings.NotificationDurationSeconds != 9 || settings.UpdateManifestUrl != "https://example.invalid/macrando.json" || settings.ExpectedSignerThumbprint != "0123456789ABCDEF0123456789ABCDEF01234567") throw new Exception("notification settings round-trip failed");
+
+                if (!settings.ShowConnectedAdaptersOnly) throw new Exception("connected-only filter was not persisted");
+                if (settings.FavoriteAdapters == null || settings.FavoriteAdapters.Count != 2) throw new Exception("favorites were not normalized (duplicates and blanks should be dropped)");
+                if (settings.FavoriteAdapters[0] != "{fav-1}" || settings.FavoriteAdapters[1] != "{fav-2}") throw new Exception("favorites lost their order");
+                if (!settings.IsFavorite("{FAV-1}") || settings.IsFavorite("{fav-3}") || settings.IsFavorite(null)) throw new Exception("favorite lookup is not case-insensitive or rejected nulls");
+                if (!settings.ToggleFavorite("{fav-3}")) throw new Exception("toggling a new favorite should report that it is now a favorite");
+                if (!settings.IsFavorite("{fav-3}")) throw new Exception("favorite was not added by toggle");
+                if (settings.ToggleFavorite("{FAV-3}")) throw new Exception("toggling an existing favorite should report that it is no longer a favorite");
+                if (settings.IsFavorite("{fav-3}")) throw new Exception("favorite was not removed by toggling again");
+
                 System.IO.File.WriteAllText(System.IO.Path.Combine(settingsRoot, "legacy.json"), "{\"StartMinimized\":true}");
                 var legacyStore = new AppSettingsStore(System.IO.Path.Combine(settingsRoot, "legacy.json"));
                 AppSettings legacySettings = legacyStore.Load();
                 if (!legacySettings.NotificationsEnabled || !legacySettings.NotificationSoundEnabled || legacySettings.NotificationDurationSeconds != 5) throw new Exception("notification defaults failed");
+
+                // A 1.2.0-era settings file has no favorites or connected-only key at all.
+                if (legacySettings.FavoriteAdapters == null || legacySettings.FavoriteAdapters.Count != 0) throw new Exception("legacy favorites did not default to an empty list");
+                if (legacySettings.ShowConnectedAdaptersOnly) throw new Exception("legacy connected-only did not default to false");
             }
             finally
             {
                 try { System.IO.Directory.Delete(settingsRoot, true); } catch { }
             }
             Console.WriteLine("mock-provider-tests=OK;settings-tests=OK");
+            int upgradeResult = UpgradeRegressionChecks.Run();
+            if (upgradeResult != 0)
+            {
+                return upgradeResult;
+            }
             return 0;
         }
         catch (Exception error)

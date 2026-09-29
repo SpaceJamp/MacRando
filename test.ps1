@@ -22,9 +22,18 @@ $sources = @(
     (Join-Path $root 'src\StateStore.cs'),
     (Join-Path $root 'src\DiagnosticsService.cs'),
     (Join-Path $root 'src\UpdateService.cs'),
-    (Join-Path $root 'tests\NetworkServiceMockTests.cs')
+    (Join-Path $root 'src\LicenseInfo.cs'),
+    (Join-Path $root 'tests\NetworkServiceMockTests.cs'),
+    (Join-Path $root 'tests\UpgradeRegressionTests.cs')
 )
-& $compiler /nologo /target:exe /platform:anycpu /langversion:5 /out:$output /reference:System.dll /reference:System.Core.dll /reference:System.Net.Http.dll /reference:System.Security.dll /reference:System.Web.Extensions.dll $sources
+$references = @(
+    '/reference:System.dll',
+    '/reference:System.Core.dll',
+    '/reference:System.Net.Http.dll',
+    '/reference:System.Security.dll',
+    '/reference:System.Web.Extensions.dll'
+)
+& $compiler /nologo /target:exe /platform:anycpu /langversion:5 /out:$output $references $sources
 if ($LASTEXITCODE -ne 0) {
     throw "Mock test compilation failed with exit code $LASTEXITCODE."
 }

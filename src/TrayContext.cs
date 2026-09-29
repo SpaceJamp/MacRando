@@ -31,6 +31,7 @@ namespace MacRando
         private readonly ToolStripMenuItem _vpnMenu;
         private readonly ToolStripMenuItem _statusMenuItem;
         private ToolStripMenuItem _versionMenuItem;
+        private ToolStripMenuItem _restoreAllMenuItem;
         private readonly ToolStripMenuItem _refreshMenuItem;
         private readonly ToolStripMenuItem _diagnosticsMenuItem;
         private readonly ToolStripMenuItem _ipPreflightMenuItem;
@@ -107,11 +108,12 @@ namespace MacRando
             _statusMenuItem.Enabled = false;
 
             BuildMenu();
+            _form.SetAdapterView(_settings.FavoriteAdapters, _settings.ShowConnectedAdaptersOnly);
             _trayIcon = LoadTrayIcon();
             _notifyIcon = new NotifyIcon
             {
                 Icon = _trayIcon,
-                Text = "MacRando",
+                Text = AppInfo.ProductName + " " + AppInfo.Version,
                 ContextMenuStrip = _menu,
                 Visible = true
             };
@@ -179,6 +181,15 @@ namespace MacRando
             ToolStripMenuItem license = new ToolStripMenuItem("License (" + LicenseInfo.SpdxId + ")");
             license.Click += (sender, args) => ShowLicense();
 
+            _restoreAllMenuItem = new ToolStripMenuItem("Restore all pending profiles");
+            _restoreAllMenuItem.Click += async (sender, args) => await RestoreAllPendingAsync();
+            ToolStripMenuItem ipHistory = new ToolStripMenuItem("View IP change history");
+            ipHistory.Click += (sender, args) => ShowIpChangeHistory();
+            ToolStripMenuItem exportBundle = new ToolStripMenuItem("Export diagnostic bundle");
+            exportBundle.Click += async (sender, args) => await ExportDiagnosticBundleAsync();
+            ToolStripMenuItem exportCertificate = new ToolStripMenuItem("Export signing certificate (public)");
+            exportCertificate.Click += async (sender, args) => await ExportPublicCertificateAsync();
+
             _exitMenuItem.Click += async (sender, args) => await ExitApplicationAsync();
 
             _menu.Items.Add(open);
@@ -199,6 +210,11 @@ namespace MacRando
             _menu.Items.Add(stateFolder);
             _menu.Items.Add(logsFolder);
             _menu.Items.Add(new ToolStripSeparator());
+            _menu.Items.Add(_restoreAllMenuItem);
+            _menu.Items.Add(ipHistory);
+            _menu.Items.Add(exportBundle);
+            _menu.Items.Add(exportCertificate);
+            _menu.Items.Add(new ToolStripSeparator());
             _menu.Items.Add(_startMinimizedMenuItem);
             _menu.Items.Add(_startWithWindowsMenuItem);
             _menu.Items.Add(_autoRandomizeMenuItem);
@@ -215,6 +231,9 @@ namespace MacRando
                 RefreshFormPresets();
             };
             _form.DhcpIpConsentChanged += (sender, args) => RefreshMenus();
+            _form.RestoreAllPendingRequested += async (sender, args) => await RestoreAllPendingAsync();
+            _form.AdapterViewChanged += (sender, args) => SaveAdapterViewPreferences();
+            _form.ToggleFavoriteRequested += (sender, args) => ToggleSelectedAdapterFavorite();
             _form.RefreshRequested += async (sender, args) => await SafeRefreshAsync();
             _form.RandomizeBothRequested += async (sender, args) =>
                 await RandomizeAsync(_form.SelectedAdapter, true, true);
@@ -377,6 +396,31 @@ namespace MacRando
             {
                 SetBusy(false);
             }
+        }
+
+        private void ToggleSelectedAdapterFavorite()
+        {
+            AdapterInfo adapter = _form.SelectedAdapter;
+            if (adapter == null)
+            {
+                return;
+            }
+            bool nowFavorite = _settings.ToggleFavorite(adapter.Key);
+            SaveNotificationSettings();
+            _form.SetAdapterView(_settings.FavoriteAdapters, _settings.ShowConnectedAdaptersOnly);
+            _form.SetStatus((nowFavorite ? "Marked as a favorite: " : "Removed from favorites: ") + adapter.Name);
+        }
+
+        private void SaveAdapterViewPreferences()
+        {
+            _settings.ShowConnectedAdaptersOnly = _form.ConnectedOnly;
+            SaveNotificationSettings();
+        }
+
+        private void UpdatePendingRestoreBanner()
+        {
+            int pending = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
+            _form.SetPendingRestoreCount(pending);
         }
 
         private async Task RunDiagnosticsAsync()
@@ -756,7 +800,10 @@ namespace MacRando
             bool canRestore,
             Func<Task> restoreAction,
             bool canRetry,
-            Func<Task> retryAction)
+            Func<Task> retryAction,
+            string retryKind = null,
+            bool retryGenerateRandomMac = false,
+            string retryRequestedMac = null)
         {
             adapterKey = adapterKey ?? string.Empty;
             string safeMessage = AppLogger.Sanitize(message);
@@ -775,7 +822,18 @@ namespace MacRando
                 popup.SetPersistent(true, 0);
                 RepositionNotifications();
             }
-            RecordNotification(title, safeMessage, NotificationKinds.Critical, adapterKey, action, canRestore, canRetry, safeMessage);
+            RecordNotification(
+                title,
+                safeMessage,
+                NotificationKinds.Critical,
+                adapterKey,
+                action,
+                canRestore,
+                canRetry,
+                safeMessage,
+                retryKind,
+                retryGenerateRandomMac,
+                retryRequestedMac);
             PlayNotificationSound(NotificationKinds.Critical);
         }
 
@@ -914,6 +972,8 @@ namespace MacRando
             Exception operationError = null;
             bool changeVerified = false;
             bool refreshFailed = false;
+            NetworkState savedState = null;
+            string proposedIpForHistory = null;
             try
             {
                 _form.SetStatus(changeMac && changeIp
@@ -923,6 +983,7 @@ namespace MacRando
                         : "Selecting an apparently unused local IPv4 address..."));
 
                 NetworkState state = await _network.GetStateAsync(adapter);
+                savedState = state;
                 UpdateProgressNotification(
                     progressPopup,
                     "MacRando: " + action,
@@ -963,6 +1024,7 @@ namespace MacRando
                 string newIp = changeIp
                     ? (await Task.Run(() => _network.FindRandomLocalAddress(state))).ToString()
                     : null;
+                proposedIpForHistory = newIp;
 
                 AppState stateFile = _stateStore.Load();
                 if (stateFile.PendingOperation != null)
@@ -1024,8 +1086,15 @@ namespace MacRando
                     AdapterKey = adapter.Key,
                     Action = action,
                     Automatic = automated,
-                    StartedAtUtc = DateTime.UtcNow
+                    StartedAtUtc = DateTime.UtcNow,
+                    Kind = RetryKinds.FromFlags(changeMac, changeIp),
+                    GenerateRandomMac = generateRandomMac,
+                    RequestedMac = generateRandomMac ? null : validatedManualMac
                 };
+                if (changeIp)
+                {
+                    RecordIpChange(adapter, savedState, proposedIpForHistory, IpChangeOutcomes.Applied, automated, "Saved a restore profile before applying.");
+                }
                 _stateStore.Save(stateFile);
                 _state = stateFile;
                 _changedAdapterKeysThisSession.Add(adapter.Key);
@@ -1075,6 +1144,10 @@ namespace MacRando
                     ? "The change was verified, but the dashboard refresh failed."
                     : result + " Restore is available from the tray menu.");
                 RecordOperation(adapter, action, automated, true, result);
+                if (changeIp)
+                {
+                    RecordIpChange(adapter, savedState, proposedIpForHistory, changeVerified ? IpChangeOutcomes.Verified : IpChangeOutcomes.Failed, automated, result);
+                }
                 AppLogger.Info("Network change completed: " + result + (refreshFailed ? "; refresh failed" : string.Empty));
                 AdapterBackup completedBackup = FindBackup(adapter.Key);
                 Func<Task> restoreAction = completedBackup == null ? (Func<Task>)null : () => RestoreAsync(completedBackup, false);
@@ -1120,6 +1193,10 @@ namespace MacRando
                     if (rolledBack)
                     {
                         AppLogger.Info("Automatic rollback completed after a failed network change.");
+                        if (changeIp)
+                        {
+                            RecordIpChange(adapter, savedState, proposedIpForHistory, IpChangeOutcomes.RolledBack, automated, "The change failed and was rolled back automatically.");
+                        }
                         if (progressPopup != null && !progressPopup.IsDisposed)
                         {
                             progressPopup.Close();
@@ -1143,7 +1220,10 @@ namespace MacRando
                             failedRestoreAction != null,
                             failedRestoreAction,
                             true,
-                            retryAction);
+                            retryAction,
+                            RetryKinds.FromFlags(changeMac, changeIp),
+                            generateRandomMac,
+                            validatedManualMac);
                         if (progressPopup == null)
                         {
                             ShowError(operationError);
@@ -1305,6 +1385,396 @@ namespace MacRando
             {
                 SetBusy(previousBusy);
             }
+        }
+
+        private async Task RestoreAllPendingAsync()
+        {
+            if (_busy || _confirmationOpen)
+            {
+                return;
+            }
+
+            var pending = new List<AdapterBackup>();
+            if (_state != null && _state.Backups != null)
+            {
+                foreach (KeyValuePair<string, AdapterBackup> item in _state.Backups)
+                {
+                    if (item.Value != null)
+                    {
+                        pending.Add(item.Value);
+                    }
+                }
+            }
+
+            if (pending.Count == 0)
+            {
+                _form.SetStatus("There are no pending restore profiles.");
+                ShowNotification(
+                    "No pending restore profiles",
+                    "Every adapter MacRando changed has already been restored.",
+                    ToolTipIcon.Info);
+                return;
+            }
+
+            _form.ShowDashboard();
+            _confirmationOpen = true;
+            DialogResult answer;
+            try
+            {
+                answer = MessageBox.Show(
+                    _form,
+                    "Restore the saved configuration for " + pending.Count + " adapter(s)?\n\n" +
+                    "This is the recovery path for a crash, a forced termination, or a power loss. " +
+                    "Each adapter is restored one at a time and verified before the next is started.",
+                    "Restore all pending profiles",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+            }
+            finally
+            {
+                _confirmationOpen = false;
+            }
+
+            if (answer != DialogResult.Yes)
+            {
+                return;
+            }
+
+            AppLogger.Info("Restore-all requested for " + pending.Count + " adapter(s).");
+            int restored = 0;
+            var failed = new List<string>();
+            foreach (AdapterBackup backup in pending)
+            {
+                if (backup == null)
+                {
+                    continue;
+                }
+                bool success = false;
+                try
+                {
+                    success = await RestoreAsync(backup, false, false, false);
+                }
+                catch (Exception error)
+                {
+                    AppLogger.Error("Restore-all failed for an adapter.", error);
+                }
+                if (success)
+                {
+                    restored++;
+                }
+                else
+                {
+                    failed.Add(backup.DisplayName);
+                }
+            }
+
+            await RefreshAllAsync(false);
+            string summary = restored + " of " + pending.Count + " adapter profile(s) restored.";
+            if (failed.Count > 0)
+            {
+                summary += " Still pending: " + string.Join(", ", failed.ToArray()) + ".";
+            }
+            _form.SetStatus(summary);
+            ShowNotification(
+                failed.Count == 0 ? "All pending profiles restored" : "Some profiles still need attention",
+                summary,
+                failed.Count == 0 ? ToolTipIcon.Info : ToolTipIcon.Warning);
+            RecordNotification(
+                failed.Count == 0 ? "Restore all completed" : "Restore all finished with failures",
+                summary,
+                failed.Count == 0 ? NotificationKinds.Success : NotificationKinds.Warning,
+                string.Empty,
+                "restore all pending profiles",
+                failed.Count > 0,
+                failed.Count > 0,
+                summary);
+        }
+
+        private void ShowIpChangeHistory()
+        {
+            var lines = new List<string>();
+            lines.Add("MacRando local IP change history");
+            lines.Add("Generated (UTC): " + DateTime.UtcNow.ToString("o"));
+            lines.Add("Version: " + AppInfo.DisplayVersion);
+            lines.Add("");
+
+            List<IpChangeRecord> records = _state == null || _state.IpChangeHistory == null
+                ? new List<IpChangeRecord>()
+                : _state.IpChangeHistory;
+
+            if (records.Count == 0)
+            {
+                lines.Add("No local IP changes have been recorded yet.");
+            }
+            else
+            {
+                lines.Add("Addresses are masked. Newest entries first.");
+                lines.Add("");
+                for (int i = records.Count - 1; i >= 0; i--)
+                {
+                    IpChangeRecord record = records[i];
+                    lines.Add(record.TimestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") +
+                        "  " + (string.IsNullOrWhiteSpace(record.AdapterName) ? "Unknown adapter" : record.AdapterName) +
+                        "  [" + IpChangeOutcomes.Normalize(record.Outcome) + "]" +
+                        (record.Automatic ? " (startup)" : string.Empty));
+                    lines.Add("    " + (record.OriginalAddress ?? "?") + " -> " + (record.ProposedAddress ?? "?") +
+                        "   prefix " + (string.IsNullOrWhiteSpace(record.OriginalPrefixLength) ? "?" : record.OriginalPrefixLength) +
+                        ", DHCP was " + (record.OriginalDhcp ?? "?") +
+                        ", gateway " + (record.OriginalGateway ?? "?"));
+                    if (!string.IsNullOrWhiteSpace(record.Notes))
+                    {
+                        lines.Add("    " + record.Notes);
+                    }
+                    lines.Add("");
+                }
+            }
+
+            ShowReadOnlyReport("MacRando IP change history", string.Join(Environment.NewLine, lines.ToArray()), "Copy history");
+        }
+
+        private async Task ExportDiagnosticBundleAsync()
+        {
+            if (_busy || _confirmationOpen)
+            {
+                return;
+            }
+
+            SetBusy(true);
+            _form.SetStatus("Collecting a diagnostic bundle...");
+            try
+            {
+                string directory = Path.Combine(_stateStore.DataDirectory, "diagnostic-bundles");
+                Directory.CreateDirectory(directory);
+                string stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+                string bundlePath = Path.Combine(directory, "MacRando-diagnostics-" + stamp + ".zip");
+
+                AdapterInfo adapter = _form.SelectedAdapter;
+                string diagnosticsText = (await _diagnostics.RunAsync(adapter)).ToDisplayText();
+                string preflightText = string.Empty;
+                if (adapter != null)
+                {
+                    try
+                    {
+                        preflightText = (await _diagnostics.RunIpPreflightAsync(adapter)).ToDisplayText();
+                    }
+                    catch (Exception preflightError)
+                    {
+                        preflightText = "IP preflight failed: " + AppLogger.Sanitize(preflightError.Message);
+                    }
+                }
+
+                var lines = new List<string>();
+                lines.Add("MacRando diagnostic bundle");
+                lines.Add("Generated (UTC): " + DateTime.UtcNow.ToString("o"));
+                lines.Add("Version: " + AppInfo.DisplayVersion);
+                lines.Add("License: " + LicenseInfo.SpdxId);
+                lines.Add("Elevated: " + (IsElevated() ? "Yes" : "No"));
+                lines.Add("Pending restore profiles: " + (_state == null || _state.Backups == null ? 0 : _state.Backups.Count));
+                lines.Add("Startup randomization enabled: " + (_settings.AutoRandomizeMacOnStartup ? "Yes" : "No"));
+                lines.Add("Notification history entries: " + (_state == null || _state.Notifications == null ? 0 : _state.Notifications.Count));
+                lines.Add("IP change history entries: " + (_state == null || _state.IpChangeHistory == null ? 0 : _state.IpChangeHistory.Count));
+                lines.Add("");
+                lines.Add("This bundle contains no MAC or IP addresses in clear text; values are masked.");
+                string summaryText = string.Join(Environment.NewLine, lines.ToArray());
+
+                string historyText = BuildNotificationHistoryExport();
+                var ipHistory = new List<string>();
+                if (_state != null && _state.IpChangeHistory != null)
+                {
+                    foreach (IpChangeRecord record in _state.IpChangeHistory)
+                    {
+                        ipHistory.Add(record.TimestampUtc.ToString("o") + "  " +
+                            (string.IsNullOrWhiteSpace(record.AdapterName) ? "Unknown adapter" : record.AdapterName) +
+                            "  " + IpChangeOutcomes.Normalize(record.Outcome) + "  " +
+                            record.OriginalAddress + " -> " + record.ProposedAddress +
+                            (string.IsNullOrWhiteSpace(record.Notes) ? string.Empty : "  " + record.Notes));
+                    }
+                }
+
+                string logText = string.Empty;
+                try
+                {
+                    string logPath = Path.Combine(_stateStore.DataDirectory, "macrando.log");
+                    if (File.Exists(logPath))
+                    {
+                        string[] allLines = File.ReadAllLines(logPath);
+                        int start = Math.Max(0, allLines.Length - 400);
+                        logText = string.Join(Environment.NewLine, allLines, start, allLines.Length - start);
+                    }
+                }
+                catch (Exception logError)
+                {
+                    logText = "Log export failed: " + AppLogger.Sanitize(logError.Message);
+                }
+
+                WriteBundle(bundlePath, new Dictionary<string, string>
+                {
+                    { "summary.txt", summaryText },
+                    { "diagnostics.txt", diagnosticsText },
+                    { "ip-preflight.txt", preflightText },
+                    { "notification-history.txt", historyText },
+                    { "ip-change-history.txt", string.Join(Environment.NewLine, ipHistory.ToArray()) },
+                    { "macrando.log", logText },
+                    { "LICENSE", LicenseInfo.GetFullText() ?? LicenseInfo.Summary }
+                });
+
+                AppLogger.Info("Diagnostic bundle written to " + AppLogger.Sanitize(bundlePath));
+                _form.SetStatus("Diagnostic bundle saved.");
+                ShowNotification(
+                    "Diagnostic bundle saved",
+                    "A sanitized bundle was written to:" + Environment.NewLine + bundlePath,
+                    ToolTipIcon.Info);
+                try
+                {
+                    Process.Start("explorer.exe", "/select,\"" + bundlePath + "\"");
+                }
+                catch
+                {
+                }
+            }
+            catch (Exception error)
+            {
+                AppLogger.Error("Diagnostic bundle export failed.", error);
+                ShowError(error);
+            }
+            finally
+            {
+                SetBusy(false);
+            }
+        }
+
+        private string BuildNotificationHistoryExport()
+        {
+            var lines = new List<string>();
+            if (_state == null || _state.Notifications == null)
+            {
+                return "No notification history.";
+            }
+            foreach (NotificationHistoryEntry entry in _state.Notifications)
+            {
+                lines.Add(entry.TimestampUtc.ToString("o") + "  [" + NotificationKinds.Normalize(entry.Severity) + "]  " +
+                    entry.Title + "  |  " + entry.Message +
+                    (string.IsNullOrWhiteSpace(entry.AdapterKey) ? string.Empty : "  |  adapter " + entry.AdapterKey) +
+                    (entry.HasStructuredRetry ? "  |  retry=" + RetryKinds.Normalize(entry.RetryKind) : string.Empty));
+            }
+            return string.Join(Environment.NewLine, lines.ToArray());
+        }
+
+        private static void WriteBundle(string path, Dictionary<string, string> files)
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+            using (var archive = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                foreach (KeyValuePair<string, string> file in files)
+                {
+                    System.IO.Compression.ZipArchiveEntry entry = archive.CreateEntry(file.Key);
+                    using (var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false)))
+                    {
+                        writer.Write(file.Value ?? string.Empty);
+                    }
+                }
+            }
+        }
+
+        private bool IsElevated()
+        {
+            try
+            {
+                using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+                {
+                    return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async Task ExportPublicCertificateAsync()
+        {
+            try
+            {
+                string executablePath;
+                try
+                {
+                    executablePath = Application.ExecutablePath;
+                }
+                catch
+                {
+                    executablePath = Process.GetCurrentProcess().MainModule.FileName;
+                }
+
+                // The path is passed through the environment so it never has to be
+                // quoted into the script text.
+                PowerShellResult result = await PowerShellRunner.RunAsync(
+                    "$signature = Get-AuthenticodeSignature -LiteralPath $env:MACRANDO_EXE; " +
+                    "if ($signature.SignerCertificate) { " +
+                    "[Console]::Write([Convert]::ToBase64String($signature.SignerCertificate.Export(" +
+                    "[System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))) }",
+                    new Dictionary<string, string> { { "MACRANDO_EXE", executablePath } },
+                    20000);
+
+                string encoded = (result == null ? null : result.StandardOutput ?? string.Empty).Trim();
+                if (result == null || result.ExitCode != 0 || string.IsNullOrWhiteSpace(encoded))
+                {
+                    ShowError(new InvalidOperationException(
+                        "The public signing certificate could not be read. " +
+                        "If this executable is not signed, there is no certificate to export."));
+                    return;
+                }
+
+                string directory = Path.Combine(_stateStore.DataDirectory, "certificates");
+                Directory.CreateDirectory(directory);
+                string path = Path.Combine(directory, "MacRando-Public.cer");
+                byte[] certificateBytes;
+                try
+                {
+                    certificateBytes = Convert.FromBase64String(encoded);
+                }
+                catch (FormatException)
+                {
+                    ShowError(new InvalidOperationException("The exported certificate was not valid base64 data."));
+                    return;
+                }
+                File.WriteAllBytes(path, certificateBytes);
+
+                _form.SetStatus("Public certificate exported.");
+                ShowNotification(
+                    "Public certificate exported",
+                    "The public certificate was written to:" + Environment.NewLine + path + Environment.NewLine + Environment.NewLine +
+                    "Only the public certificate is exported; the private key never leaves the Windows certificate store. " +
+                    "Run trust-certificate.ps1 to install it into the Trusted Publisher store.",
+                    ToolTipIcon.Info);
+            }
+            catch (Exception error)
+            {
+                AppLogger.Error("Public certificate export failed.", error);
+                ShowError(error);
+            }
+        }
+
+        private async Task SendTestNotificationAsync()
+        {
+            await Task.Run(() => { });
+            ShowNotification(
+                "Test notification",
+                "This is a test notification from MacRando " + AppInfo.DisplayVersion + ". " +
+                "Popups, sound, grouping, and history all behave the same as a real operation.",
+                ToolTipIcon.Info);
+            RecordNotification(
+                "Test notification",
+                "A test notification was sent from the notification center.",
+                NotificationKinds.Info,
+                string.Empty,
+                "test notification",
+                false,
+                false,
+                "Sent manually by the user.");
         }
 
         private async Task VpnActionAsync(VpnProfile profile, bool disconnect)
@@ -1644,6 +2114,14 @@ namespace MacRando
             _diagnosticsMenuItem.Enabled = !interactionBusy;
             _ipPreflightMenuItem.Enabled = !interactionBusy;
             _updateMenuItem.Enabled = !interactionBusy;
+            if (_restoreAllMenuItem != null)
+            {
+                int pendingCount = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
+                _restoreAllMenuItem.Enabled = !interactionBusy && pendingCount > 0;
+                _restoreAllMenuItem.Text = pendingCount > 0
+                    ? "Restore all pending profiles (" + pendingCount + ")"
+                    : "Restore all pending profiles";
+            }
             int unreadNotifications = 0;
             if (_state.Notifications != null)
             {
@@ -1686,6 +2164,54 @@ namespace MacRando
             AdapterInfo adapter = _form.SelectedAdapter;
             _form.IsBackupAvailable = adapter != null && FindBackup(adapter.Key) != null;
             _form.SetBackupAvailable(_form.IsBackupAvailable);
+            UpdatePendingRestoreBanner();
+        }
+
+        private void RecordIpChange(
+            AdapterInfo adapter,
+            NetworkState originalState,
+            string proposedIp,
+            string outcome,
+            bool automatic,
+            string notes)
+        {
+            try
+            {
+                if (!_stateLoadedSuccessfully)
+                {
+                    return;
+                }
+                if (_state.IpChangeHistory == null)
+                {
+                    _state.IpChangeHistory = new List<IpChangeRecord>();
+                }
+                // Addresses are masked here, not only on load, so no unmasked value is
+                // ever handed to the serializer.
+                _state.IpChangeHistory.Add(new IpChangeRecord
+                {
+                    RecordId = Guid.NewGuid().ToString("N"),
+                    TimestampUtc = DateTime.UtcNow,
+                    AdapterKey = adapter == null ? string.Empty : adapter.Key,
+                    AdapterName = adapter == null ? string.Empty : adapter.Name,
+                    OriginalAddress = originalState == null ? "Unavailable" : AppLogger.MaskIp(originalState.IpAddress),
+                    ProposedAddress = AppLogger.MaskIp(proposedIp),
+                    OriginalPrefixLength = originalState == null ? string.Empty : originalState.PrefixLength.ToString(),
+                    OriginalDhcp = originalState == null ? "Unavailable" : (originalState.DhcpEnabled ? "Enabled" : "Disabled"),
+                    OriginalGateway = originalState == null ? "Unavailable" : AppLogger.MaskIp(originalState.Gateway),
+                    Outcome = IpChangeOutcomes.Normalize(outcome),
+                    Automatic = automatic,
+                    Notes = AppLogger.Sanitize(notes)
+                });
+                if (_state.IpChangeHistory.Count > 50)
+                {
+                    _state.IpChangeHistory.RemoveRange(0, _state.IpChangeHistory.Count - 50);
+                }
+                _stateStore.Save(_state);
+            }
+            catch (Exception error)
+            {
+                AppLogger.Warning("Could not record IP change history: " + error.Message);
+            }
         }
 
         private void RecordOperation(AdapterInfo adapter, string action, bool automatic, bool success, string result)
@@ -2307,6 +2833,22 @@ namespace MacRando
             bool canRetry,
             string details)
         {
+            RecordNotification(title, message, severity, adapterKey, action, canRestore, canRetry, details, RetryKinds.None, false, null);
+        }
+
+        private void RecordNotification(
+            string title,
+            string message,
+            string severity,
+            string adapterKey,
+            string action,
+            bool canRestore,
+            bool canRetry,
+            string details,
+            string retryKind,
+            bool retryGenerateRandomMac,
+            string retryRequestedMac)
+        {
             try
             {
                 if (!_stateLoadedSuccessfully)
@@ -2330,7 +2872,10 @@ namespace MacRando
                     Details = AppLogger.Sanitize(details),
                     CanRestore = canRestore,
                     CanRetry = canRetry,
-                    Acknowledged = false
+                    Acknowledged = false,
+                    RetryKind = RetryKinds.Normalize(retryKind),
+                    RetryGenerateRandomMac = retryGenerateRandomMac,
+                    RetryRequestedMac = retryGenerateRandomMac ? null : AppLogger.Sanitize(retryRequestedMac)
                 });
                 if (_state.Notifications.Count > 100)
                 {
@@ -2540,6 +3085,7 @@ namespace MacRando
                     _notificationCenterForm.RefreshRequested += (sender, args) => RefreshNotificationCenter();
                     _notificationCenterForm.SettingsChanged += (sender, args) => SaveNotificationSettings();
                     _notificationCenterForm.CheckUpdatesRequested += async (sender, args) => await CheckForUpdatesAsync();
+                    _notificationCenterForm.SendTestNotificationRequested += async (sender, args) => await SendTestNotificationAsync();
                 }
                 else
                 {
@@ -2648,18 +3194,48 @@ namespace MacRando
                 await RestoreFromNotificationAsync(entry);
                 return;
             }
-            string action = entry.Action ?? string.Empty;
-            bool changeMac = action.IndexOf("MAC", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                action.IndexOf("startup", StringComparison.OrdinalIgnoreCase) >= 0;
-            bool changeIp = action.IndexOf("IPv4", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                action.IndexOf("IP", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            bool changeMac;
+            bool changeIp;
+            bool generateRandomMac = true;
+            string requestedMac = null;
             AdapterInfo adapter = FindAdapterByKey(entry.AdapterKey);
-            if (adapter == null || (!changeMac && !changeIp) || action.IndexOf("entered", StringComparison.OrdinalIgnoreCase) >= 0)
+
+            if (entry.HasStructuredRetry)
+            {
+                changeMac = RetryKinds.IncludesMac(entry.RetryKind);
+                changeIp = RetryKinds.IncludesIp(entry.RetryKind);
+                generateRandomMac = entry.RetryGenerateRandomMac;
+                requestedMac = entry.RetryRequestedMac;
+            }
+            else
+            {
+                // Entries written before 1.3.0 have no structured retry metadata, so the
+                // display Action text is the only available signal. Treat it as untrusted.
+                AppLogger.Info("Retrying a legacy notification using its display action text.");
+                string action = entry.Action ?? string.Empty;
+                changeMac = action.IndexOf("MAC", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    action.IndexOf("startup", StringComparison.OrdinalIgnoreCase) >= 0;
+                changeIp = action.IndexOf("IPv4", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    action.IndexOf("IP", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (action.IndexOf("entered", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    changeMac = false;
+                    changeIp = false;
+                }
+            }
+
+            if (adapter == null || (!changeMac && !changeIp))
             {
                 ShowError(new InvalidOperationException("This notification's retry action is no longer available. Open the dashboard to start a new operation."));
                 return;
             }
-            await ChangeNetworkAsync(adapter, changeMac, changeIp, null, true, false);
+            if (changeMac && !generateRandomMac && string.IsNullOrWhiteSpace(requestedMac))
+            {
+                ShowError(new InvalidOperationException("The manual MAC address for this notification is missing. Open the dashboard to enter it again."));
+                return;
+            }
+            await ChangeNetworkAsync(adapter, changeMac, changeIp, requestedMac, generateRandomMac, false);
         }
 
         private AdapterInfo FindAdapterByKey(string adapterKey)

@@ -75,6 +75,7 @@ namespace MacRando
         public string DnsPlan { get; set; }
         public List<string> Checks { get; set; }
         public List<string> Warnings { get; set; }
+        public List<PreflightChangeItem> Changes { get; set; }
 
         public string ToDisplayText()
         {
@@ -91,6 +92,15 @@ namespace MacRando
             lines.Add("DHCP plan: " + DhcpPlan);
             lines.Add("Gateway plan: " + GatewayPlan);
             lines.Add("DNS plan: " + DnsPlan);
+            if (Changes != null && Changes.Count > 0)
+            {
+                lines.Add("");
+                lines.Add("Planned changes:");
+                foreach (PreflightChangeItem item in Changes)
+                {
+                    lines.Add(item.ToDisplayLine());
+                }
+            }
             lines.Add("");
             lines.Add("Checks:");
             foreach (string check in Checks ?? new List<string>())
@@ -142,7 +152,8 @@ namespace MacRando
                 DhcpPlan = "Unavailable",
                 DnsPlan = "Unavailable",
                 Checks = new List<string>(),
-                Warnings = new List<string>()
+                Warnings = new List<string>(),
+                Changes = new List<PreflightChangeItem>()
             };
             if (selectedAdapter == null)
             {
@@ -151,9 +162,11 @@ namespace MacRando
                 return report;
             }
 
+            NetworkState capturedState = null;
             try
             {
                 NetworkState state = await _network.GetStateAsync(selectedAdapter);
+                capturedState = state;
                 report.CurrentIp = AppLogger.MaskIp(state.IpAddress);
                 report.PrefixLength = state.PrefixLength.ToString();
                 report.DhcpMode = state.DhcpEnabled ? "Enabled" : "Disabled";
@@ -214,7 +227,100 @@ namespace MacRando
             }
 
             report.Checks.Add("No Set-NetIPAddress, New-NetIPAddress, route, DHCP, or adapter restart command was run.");
+            BuildChangeList(report, capturedState);
             return report;
+        }
+
+        private static void BuildChangeList(IpPreflightReport report, NetworkState state)
+        {
+            if (report.Changes == null)
+            {
+                report.Changes = new List<PreflightChangeItem>();
+            }
+            if (state == null)
+            {
+                report.Changes.Add(new PreflightChangeItem
+                {
+                    Setting = "Adapter settings",
+                    Current = "Unavailable",
+                    Planned = "Unavailable",
+                    Changes = false,
+                    Note = "state could not be read"
+                });
+                return;
+            }
+
+            report.Changes.Add(new PreflightChangeItem
+            {
+                Setting = "IPv4 address",
+                Current = AppLogger.MaskIp(state.IpAddress),
+                Planned = report.ProposedIp,
+                Changes = true,
+                Note = "temporary static address; restore returns the saved value"
+            });
+            report.Changes.Add(new PreflightChangeItem
+            {
+                Setting = "IPv4 prefix",
+                Current = state.PrefixLength.ToString(),
+                Planned = state.PrefixLength.ToString(),
+                Changes = false
+            });
+            report.Changes.Add(new PreflightChangeItem
+            {
+                Setting = "DHCP",
+                Current = state.DhcpEnabled ? "Enabled" : "Disabled",
+                Planned = "Disabled temporarily",
+                Changes = state.DhcpEnabled,
+                Note = state.DhcpEnabled ? "restore re-enables DHCP" : "static mode is preserved"
+            });
+            report.Changes.Add(new PreflightChangeItem
+            {
+                Setting = "Default gateway",
+                Current = string.IsNullOrWhiteSpace(state.Gateway) ? "(none)" : AppLogger.MaskIp(state.Gateway),
+                Planned = string.IsNullOrWhiteSpace(state.Gateway) ? "(none)" : AppLogger.MaskIp(state.Gateway),
+                Changes = false,
+                Note = "existing default route is preserved"
+            });
+            report.Changes.Add(new PreflightChangeItem
+            {
+                Setting = "DNS servers",
+                Current = FormatDns(state.DnsServers),
+                Planned = FormatDns(state.DnsServers),
+                Changes = false,
+                Note = state.DnsServers == null || state.DnsServers.Length == 0
+                    ? "no DNS detected; live operation would reset to automatic"
+                    : "reapplied after the address change"
+            });
+            report.Changes.Add(new PreflightChangeItem
+            {
+                Setting = "Default routes",
+                Current = "Existing routes",
+                Planned = "Unchanged",
+                Changes = false,
+                Note = "no route command is ever run"
+            });
+            report.Changes.Add(new PreflightChangeItem
+            {
+                Setting = "MAC address",
+                Current = AppLogger.MaskMac(state.CurrentMacAddress),
+                Planned = AppLogger.MaskMac(state.CurrentMacAddress),
+                Changes = false,
+                Note = "an IP-only change does not touch the MAC"
+            });
+        }
+
+        private static string FormatDns(string[] servers)
+        {
+            if (servers == null || servers.Length == 0)
+            {
+                return "(automatic)";
+            }
+            var parts = new List<string>();
+            foreach (string server in servers)
+            {
+                parts.Add(AppLogger.MaskIp(server));
+            }
+            return string.Join(", ", parts.ToArray());
         }
 
         public async Task<DiagnosticReport> RunAsync(AdapterInfo selectedAdapter)

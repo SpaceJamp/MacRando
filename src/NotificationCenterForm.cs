@@ -48,6 +48,7 @@ namespace MacRando
         public event EventHandler RefreshRequested;
         public event EventHandler SettingsChanged;
         public event EventHandler CheckUpdatesRequested;
+        public event EventHandler SendTestNotificationRequested;
 
         public NotificationHistoryEntry SelectedEntry
         {
@@ -265,6 +266,9 @@ namespace MacRando
             var checkUpdates = MakeButton("Check for updates", false);
             checkUpdates.Click += (sender, args) => RaiseCheckUpdates();
             settingsLayout.Controls.Add(checkUpdates);
+            var sendTest = MakeButton("Send test notification", false);
+            sendTest.Click += (sender, args) => RaiseSendTestNotification();
+            settingsLayout.Controls.Add(sendTest);
             settings.Controls.Add(settingsLayout);
 
             var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
@@ -489,6 +493,14 @@ namespace MacRando
             if (CheckUpdatesRequested != null)
             {
                 CheckUpdatesRequested(this, EventArgs.Empty);
+            }
+        }
+
+        private void RaiseSendTestNotification()
+        {
+            if (SendTestNotificationRequested != null)
+            {
+                SendTestNotificationRequested(this, EventArgs.Empty);
             }
         }
 

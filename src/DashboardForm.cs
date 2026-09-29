@@ -145,6 +145,18 @@ namespace MacRando
         private readonly Label _adapterCountLabel;
         private readonly Label _listHintLabel;
         private Label _licenseLabel;
+        private TextBox _adapterSearchBox;
+        private CheckBox _connectedOnlyCheckBox;
+        private Button _favoriteButton;
+        private Panel _pendingBanner;
+        private Label _pendingBannerLabel;
+        private Label _driverLabel;
+        private Label _interfaceIndexLabel;
+        private Label _macPropertyLabel;
+        private Label _guidLabel;
+        private List<AdapterInfo> _allAdapters = new List<AdapterInfo>();
+        private List<string> _favoriteKeys = new List<string>();
+        private bool _suppressViewEvents;
         private readonly Label _selectedTitleLabel;
         private readonly Label _selectedStatusLabel;
         private readonly Label _currentMacLabel;
@@ -189,6 +201,8 @@ namespace MacRando
         public event EventHandler NotificationCenterRequested;
         public event EventHandler IpPreflightRequested;
         public event EventHandler DarkModeChanged;
+        public event EventHandler AdapterViewChanged;
+        public event EventHandler RestoreAllPendingRequested;
 
         public AdapterInfo SelectedAdapter
         {
@@ -407,68 +421,18 @@ namespace MacRando
 
         public void SetAdapters(IList<AdapterInfo> adapters)
         {
-            string selectedKey = _selectedAdapter == null ? null : _selectedAdapter.Key;
-            _suppressAdapterSelectionEvents = true;
-            try
+            _allAdapters = new List<AdapterInfo>();
+            if (adapters != null)
             {
-                _adapterList.BeginUpdate();
-                try
+                foreach (AdapterInfo adapter in adapters)
                 {
-                    _adapterList.Items.Clear();
-                    ListViewItem selectedItem = null;
-                    ListViewItem firstUpItem = null;
-                    if (adapters != null)
+                    if (adapter != null)
                     {
-                        foreach (AdapterInfo adapter in adapters)
-                        {
-                            ListViewItem item = new ListViewItem(adapter.Name ?? "Unknown adapter");
-                            item.SubItems.Add(string.IsNullOrWhiteSpace(adapter.Status) ? "Unknown" : adapter.Status);
-                            item.SubItems.Add(string.IsNullOrWhiteSpace(adapter.IpAddress) ? "—" : adapter.IpAddress);
-                            item.ToolTipText = adapter.ToString() + "  •  " + (string.IsNullOrWhiteSpace(adapter.IpAddress) ? "No IPv4" : adapter.IpAddress);
-                            item.Tag = adapter;
-                            _adapterList.Items.Add(item);
-                            if (firstUpItem == null && adapter.IsUp)
-                            {
-                                firstUpItem = item;
-                            }
-                            if (!string.IsNullOrWhiteSpace(selectedKey) && string.Equals(adapter.Key, selectedKey, StringComparison.OrdinalIgnoreCase))
-                            {
-                                selectedItem = item;
-                            }
-                        }
-                    }
-
-                    if (selectedItem == null)
-                    {
-                        selectedItem = firstUpItem ?? (_adapterList.Items.Count > 0 ? _adapterList.Items[0] : null);
-                    }
-                    if (selectedItem != null)
-                    {
-                        selectedItem.Selected = true;
-                        _selectedAdapter = selectedItem.Tag as AdapterInfo;
-                    }
-                    else
-                    {
-                        _selectedAdapter = null;
+                        _allAdapters.Add(adapter);
                     }
                 }
-                finally
-                {
-                    _adapterList.EndUpdate();
-                }
             }
-            finally
-            {
-                _suppressAdapterSelectionEvents = false;
-            }
-
-            if (_adapterList.SelectedItems.Count == 1)
-            {
-                _adapterList.SelectedItems[0].EnsureVisible();
-            }
-
-            _adapterCountLabel.Text = adapters == null ? "0 adapters" : adapters.Count + " adapters";
-            UpdateSelectionDetails();
+            RebuildAdapterList();
         }
 
         public void SetVpnProfiles(IList<VpnProfile> profiles)
@@ -673,18 +637,69 @@ namespace MacRando
 
         private void BuildRootLayout()
         {
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(0) };
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(0) };
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.Controls.Add(_headerPanel, 0, 0);
+
+            _pendingBanner = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Visible = false, Padding = new Padding(18, 8, 18, 8), Margin = Padding.Empty, Tag = Color.Goldenrod };
+            var bannerLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+            bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            _pendingBannerLabel = MakeMutedLabel(string.Empty);
+            _pendingBannerLabel.Dock = DockStyle.Fill;
+            _pendingBannerLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _pendingBannerLabel.Margin = new Padding(0, 0, 12, 0);
+            var restoreAllButton = MakeButton("Restore all", false, new Size(96, 28));
+            restoreAllButton.AutoSize = true;
+            restoreAllButton.Anchor = AnchorStyles.Right;
+            restoreAllButton.Margin = new Padding(0, 0, 8, 0);
+            restoreAllButton.Click += (sender, args) =>
+            {
+                if (RestoreAllPendingRequested != null)
+                {
+                    RestoreAllPendingRequested(this, EventArgs.Empty);
+                }
+            };
+            var bannerDismissButton = MakeButton("Dismiss", false, new Size(84, 28));
+            bannerDismissButton.AutoSize = true;
+            bannerDismissButton.Anchor = AnchorStyles.Right;
+            bannerDismissButton.Click += (sender, args) => _pendingBanner.Visible = false;
+            _toolTip.SetToolTip(bannerDismissButton, "Hide this banner for the current session. The tray menu can still restore pending profiles.");
+            bannerLayout.Controls.Add(_pendingBannerLabel, 0, 0);
+            bannerLayout.Controls.Add(restoreAllButton, 1, 0);
+            bannerLayout.Controls.Add(bannerDismissButton, 2, 0);
+            _pendingBanner.Controls.Add(bannerLayout);
+            root.Controls.Add(_pendingBanner, 0, 1);
 
             var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new Padding(0) };
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44));
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56));
             body.Controls.Add(_listPanel, 0, 0);
             body.Controls.Add(_detailsPanel, 1, 0);
-            root.Controls.Add(body, 0, 1);
+            root.Controls.Add(body, 0, 2);
             Controls.Add(root);
+        }
+
+        public void SetPendingRestoreCount(int count)
+        {
+            if (_pendingBanner == null || _pendingBannerLabel == null)
+            {
+                return;
+            }
+            if (count > 0)
+            {
+                _pendingBannerLabel.Text = count == 1
+                    ? "1 adapter has a pending restore profile. Restoring returns it to the saved configuration."
+                    : count + " adapters have pending restore profiles. Restoring returns them to the saved configuration.";
+                _pendingBanner.Visible = true;
+            }
+            else
+            {
+                _pendingBanner.Visible = false;
+            }
         }
 
         private void BuildHeader()
@@ -742,8 +757,10 @@ namespace MacRando
 
         private void BuildListPane()
         {
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(18, 18, 14, 14) };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(18, 18, 14, 14) };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
@@ -754,23 +771,291 @@ namespace MacRando
             title.TextAlign = ContentAlignment.MiddleLeft;
             title.Font = new Font("Segoe UI Semibold", 8F, FontStyle.Bold, GraphicsUnit.Point);
             layout.Controls.Add(title, 0, 0);
-            layout.Controls.Add(_adapterList, 0, 1);
+
+            _adapterSearchBox = new TextBox { Dock = DockStyle.Fill, Margin = new Padding(0, 2, 0, 4) };
+            SetCueBanner(_adapterSearchBox, "Search adapters...");
+            _toolTip.SetToolTip(_adapterSearchBox, "Filter adapters by name or hardware description.");
+            _adapterSearchBox.TextChanged += (sender, args) =>
+            {
+                if (_suppressViewEvents)
+                {
+                    return;
+                }
+                RebuildAdapterList();
+                RaiseAdapterViewChanged();
+            };
+            layout.Controls.Add(_adapterSearchBox, 0, 1);
+
+            var filterRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = new Padding(0, 0, 0, 4) };
+            _connectedOnlyCheckBox = new CheckBox { Text = "Connected only", AutoSize = true, Margin = new Padding(0, 4, 12, 0) };
+            _connectedOnlyCheckBox.CheckedChanged += (sender, args) =>
+            {
+                if (_suppressViewEvents)
+                {
+                    return;
+                }
+                RebuildAdapterList();
+                RaiseAdapterViewChanged();
+            };
+            _favoriteButton = MakeButton("Star selected", false, new Size(120, 26));
+            _favoriteButton.AutoSize = true;
+            _favoriteButton.Margin = new Padding(0, 0, 0, 0);
+            _favoriteButton.Anchor = AnchorStyles.Left;
+            _toolTip.SetToolTip(_favoriteButton, "Mark or unmark the selected adapter as a favorite. Favorites are listed first.");
+            _favoriteButton.Click += (sender, args) =>
+            {
+                if (SelectedAdapter != null && AdapterViewChanged != null)
+                {
+                    ToggleFavoriteRequested(this, EventArgs.Empty);
+                }
+            };
+            filterRow.Controls.Add(_connectedOnlyCheckBox);
+            filterRow.Controls.Add(_favoriteButton);
+            layout.Controls.Add(filterRow, 0, 2);
+
+            layout.Controls.Add(_adapterList, 0, 3);
             _listHintLabel.Dock = DockStyle.Fill;
             _listHintLabel.TextAlign = ContentAlignment.MiddleLeft;
-            layout.Controls.Add(_listHintLabel, 0, 2);
+            layout.Controls.Add(_listHintLabel, 0, 4);
             _licenseLabel = MakeMutedLabel(LicenseInfo.Notice);
             _licenseLabel.Dock = DockStyle.Fill;
             _licenseLabel.TextAlign = ContentAlignment.MiddleLeft;
             _licenseLabel.Font = new Font("Segoe UI", 8F, FontStyle.Regular, GraphicsUnit.Point);
             _toolTip.SetToolTip(_licenseLabel, "Open the tray menu and choose License to read the full " + LicenseInfo.Name + ".");
-            layout.Controls.Add(_licenseLabel, 0, 3);
+            layout.Controls.Add(_licenseLabel, 0, 5);
             _listPanel.Controls.Add(layout);
+        }
+
+        private void RaiseAdapterViewChanged()
+        {
+            if (AdapterViewChanged != null)
+            {
+                AdapterViewChanged(this, EventArgs.Empty);
+            }
+        }
+
+        public event EventHandler ToggleFavoriteRequested;
+
+        public string AdapterSearchText
+        {
+            get { return _adapterSearchBox == null ? string.Empty : _adapterSearchBox.Text; }
+        }
+
+        public bool ConnectedOnly
+        {
+            get { return _connectedOnlyCheckBox != null && _connectedOnlyCheckBox.Checked; }
+        }
+
+        public void SetAdapterView(List<string> favoriteKeys, bool connectedOnly)
+        {
+            _suppressViewEvents = true;
+            try
+            {
+                _favoriteKeys = favoriteKeys == null ? new List<string>() : new List<string>(favoriteKeys);
+                if (_connectedOnlyCheckBox != null)
+                {
+                    _connectedOnlyCheckBox.Checked = connectedOnly;
+                }
+            }
+            finally
+            {
+                _suppressViewEvents = false;
+            }
+            RebuildAdapterList();
+        }
+
+        public void UpdateFavoriteButton()
+        {
+            if (_favoriteButton == null)
+            {
+                return;
+            }
+            AdapterInfo adapter = _selectedAdapter;
+            bool isFavorite = false;
+            if (adapter != null)
+            {
+                foreach (string key in _favoriteKeys)
+                {
+                    if (string.Equals(key, adapter.Key, StringComparison.OrdinalIgnoreCase))
+                    {
+                        isFavorite = true;
+                        break;
+                    }
+                }
+            }
+            _favoriteButton.Text = isFavorite ? "Unstar selected" : "Star selected";
+            _favoriteButton.Enabled = adapter != null;
+        }
+
+        private void RebuildAdapterList()
+        {
+            string selectedKey = _selectedAdapter == null ? null : _selectedAdapter.Key;
+            string search = AdapterSearchText == null ? string.Empty : AdapterSearchText.Trim();
+            bool connectedOnly = ConnectedOnly;
+
+            var visible = new List<AdapterInfo>();
+            foreach (AdapterInfo adapter in _allAdapters)
+            {
+                if (adapter == null)
+                {
+                    continue;
+                }
+                if (connectedOnly && !adapter.IsUp)
+                {
+                    continue;
+                }
+                if (!string.IsNullOrWhiteSpace(search) &&
+                    (adapter.Name ?? string.Empty).IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0 &&
+                    (adapter.Description ?? string.Empty).IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+                visible.Add(adapter);
+            }
+
+            // Favorites first, then connected adapters, then the original order.
+            var ordered = new List<AdapterInfo>();
+            foreach (AdapterInfo adapter in visible)
+            {
+                if (IsFavorite(adapter.Key))
+                {
+                    ordered.Add(adapter);
+                }
+            }
+            foreach (AdapterInfo adapter in visible)
+            {
+                if (adapter.IsUp && !IsFavorite(adapter.Key))
+                {
+                    ordered.Add(adapter);
+                }
+            }
+            foreach (AdapterInfo adapter in visible)
+            {
+                if (!adapter.IsUp && !IsFavorite(adapter.Key))
+                {
+                    ordered.Add(adapter);
+                }
+            }
+
+            PopulateAdapterList(ordered, selectedKey);
+            _adapterCountLabel.Text = BuildAdapterCountText(ordered.Count);
+            UpdateFavoriteButton();
+        }
+
+        private bool IsFavorite(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return false;
+            }
+            foreach (string favorite in _favoriteKeys)
+            {
+                if (string.Equals(favorite, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private string BuildAdapterCountText(int visibleCount)
+        {
+            int total = _allAdapters.Count;
+            if (visibleCount == total)
+            {
+                return total + " adapter" + (total == 1 ? string.Empty : "s");
+            }
+            return visibleCount + " of " + total + " adapters";
+        }
+
+        private void PopulateAdapterList(IList<AdapterInfo> adapters, string selectedKey)
+        {
+            _suppressAdapterSelectionEvents = true;
+            try
+            {
+                _adapterList.BeginUpdate();
+                try
+                {
+                    _adapterList.Items.Clear();
+                    ListViewItem selectedItem = null;
+                    ListViewItem firstUpItem = null;
+                    if (adapters != null)
+                    {
+                        foreach (AdapterInfo adapter in adapters)
+                        {
+                            ListViewItem item = new ListViewItem((IsFavorite(adapter.Key) ? "★ " : string.Empty) + (adapter.Name ?? "Unknown adapter"));
+                            item.SubItems.Add(string.IsNullOrWhiteSpace(adapter.Status) ? "Unknown" : adapter.Status);
+                            item.SubItems.Add(string.IsNullOrWhiteSpace(adapter.IpAddress) ? "—" : adapter.IpAddress);
+                            item.ToolTipText = adapter.ToString() + "  •  " + (string.IsNullOrWhiteSpace(adapter.IpAddress) ? "No IPv4" : adapter.IpAddress);
+                            item.Tag = adapter;
+                            _adapterList.Items.Add(item);
+                            if (firstUpItem == null && adapter.IsUp)
+                            {
+                                firstUpItem = item;
+                            }
+                            if (!string.IsNullOrWhiteSpace(selectedKey) && string.Equals(adapter.Key, selectedKey, StringComparison.OrdinalIgnoreCase))
+                            {
+                                selectedItem = item;
+                            }
+                        }
+                    }
+
+                    if (selectedItem == null)
+                    {
+                        selectedItem = firstUpItem ?? (_adapterList.Items.Count > 0 ? _adapterList.Items[0] : null);
+                    }
+                    if (selectedItem != null)
+                    {
+                        selectedItem.Selected = true;
+                        _selectedAdapter = selectedItem.Tag as AdapterInfo;
+                    }
+                    else
+                    {
+                        _selectedAdapter = null;
+                    }
+                }
+                finally
+                {
+                    _adapterList.EndUpdate();
+                }
+            }
+            finally
+            {
+                _suppressAdapterSelectionEvents = false;
+            }
+
+            if (_adapterList.SelectedItems.Count == 1)
+            {
+                _adapterList.SelectedItems[0].EnsureVisible();
+            }
+            UpdateSelectionDetails();
         }
 
         private void BuildDetailsPane()
         {
             TableLayoutPanel page = CreatePageLayout();
             AddPageHeading(page, _selectedTitleLabel, _selectedStatusLabel);
+
+            _driverLabel = MakeValueLabel("—");
+            _interfaceIndexLabel = MakeValueLabel("—");
+            _macPropertyLabel = MakeValueLabel("—");
+            TableLayoutPanel adapterBody;
+            TableLayoutPanel adapterCard = CreateCard("Adapter details", 2, 4, out adapterBody);
+            SetBodyRows(adapterBody, 22, 30, 22, 30);
+            AddCellLabel(adapterBody, "Driver", 0, 0);
+            AddCellLabel(adapterBody, "Interface index", 1, 0);
+            ConfigureValueCell(_driverLabel);
+            ConfigureValueCell(_interfaceIndexLabel);
+            adapterBody.Controls.Add(_driverLabel, 0, 1);
+            adapterBody.Controls.Add(_interfaceIndexLabel, 1, 1);
+            AddCellLabel(adapterBody, "NetworkAddress property", 0, 2);
+            AddCellLabel(adapterBody, "Interface GUID", 1, 2);
+            ConfigureValueCell(_macPropertyLabel);
+            adapterBody.Controls.Add(_macPropertyLabel, 0, 3);
+            _guidLabel = MakeValueLabel("—");
+            ConfigureValueCell(_guidLabel);
+            adapterBody.Controls.Add(_guidLabel, 1, 3);
+            AddPageRow(page, adapterCard);
 
             TableLayoutPanel macBody;
             TableLayoutPanel macCard = CreateCard("MAC address", 2, 6, out macBody);
@@ -919,6 +1204,10 @@ namespace MacRando
                 _networkIpLabel.Text = "—";
                 _networkModeLabel.Text = "—";
                 _networkLinkLabel.Text = "—";
+                _driverLabel.Text = "—";
+                _interfaceIndexLabel.Text = "—";
+                _macPropertyLabel.Text = "—";
+                _guidLabel.Text = "—";
                 _toolTip.SetToolTip(_selectedTitleLabel, _selectedTitleLabel.Text);
                 _toolTip.SetToolTip(_selectedStatusLabel, _selectedStatusLabel.Text);
                 _randomizeBothButton.Enabled = false;
@@ -955,6 +1244,13 @@ namespace MacRando
             _networkIpLabel.Text = string.IsNullOrWhiteSpace(adapter.IpAddress) ? "—" : adapter.IpAddress + "/" + adapter.PrefixLength;
             _networkModeLabel.Text = adapter.DhcpEnabled ? "DHCP" : "Static";
             _networkLinkLabel.Text = string.IsNullOrWhiteSpace(adapter.LinkSpeed) ? "—" : adapter.LinkSpeed;
+            _driverLabel.Text = string.IsNullOrWhiteSpace(adapter.Description) ? "—" : adapter.Description;
+            _interfaceIndexLabel.Text = adapter.InterfaceIndex > 0 ? adapter.InterfaceIndex.ToString() : "—";
+            _macPropertyLabel.Text = adapter.MacPropertySupported ? "Available" : "Not exposed";
+            _guidLabel.Text = string.IsNullOrWhiteSpace(adapter.InterfaceGuid) ? "—" : adapter.InterfaceGuid;
+            _toolTip.SetToolTip(_driverLabel, "Driver: " + _driverLabel.Text);
+            _toolTip.SetToolTip(_guidLabel, "Interface GUID: " + _guidLabel.Text);
+            UpdateFavoriteButton();
             _toolTip.SetToolTip(_selectedTitleLabel, _selectedTitleLabel.Text);
             _toolTip.SetToolTip(_selectedStatusLabel, _selectedStatusLabel.Text);
             _toolTip.SetToolTip(_currentMacLabel, "Current MAC: " + _currentMacLabel.Text);
@@ -1331,6 +1627,30 @@ namespace MacRando
             using (Icon fallback = SystemIcons.Application)
             {
                 return (Icon)fallback.Clone();
+            }
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int message, IntPtr wParam, string lParam);
+
+        private static void SetCueBanner(TextBox box, string text)
+        {
+            if (box == null || box.IsDisposed)
+            {
+                return;
+            }
+            try
+            {
+                if (!box.IsHandleCreated)
+                {
+                    box.HandleCreated += (sender, args) => SetCueBanner(box, text);
+                    return;
+                }
+                // EM_SETCUEBANNER keeps the box self-explanatory without a separate label.
+                SendMessage(box.Handle, 0x1501, IntPtr.Zero, text ?? string.Empty);
+            }
+            catch
+            {
             }
         }
 
