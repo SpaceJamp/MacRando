@@ -190,80 +190,6 @@ namespace MacRando
             base.Dispose(disposing);
         }
 
-        private void BuildMenu()
-        {
-            ToolStripMenuItem open = new ToolStripMenuItem("Open dashboard");
-            open.Click += (sender, args) => _form.ShowDashboard();
-
-            _refreshMenuItem.Click += async (sender, args) => await SafeRefreshAsync();
-            _diagnosticsMenuItem.Click += async (sender, args) => await RunDiagnosticsAsync();
-            _ipPreflightMenuItem.Click += async (sender, args) => await RunIpPreflightAsync();
-            _deviceTrackingMenuItem.Click += async (sender, args) => await InspectDeviceTrackingAsync();
-            _updateMenuItem.Click += async (sender, args) => await CheckForUpdatesAsync();
-            _notificationCenterMenuItem.Click += (sender, args) => ShowNotificationCenter();
-            _startMinimizedMenuItem.Click += (sender, args) => ToggleStartMinimized();
-            _startWithWindowsMenuItem.Click += (sender, args) => ToggleStartWithWindows();
-            _autoRandomizeMenuItem.Click += (sender, args) => ToggleStartupRandomization();
-
-            ToolStripMenuItem stateFolder = new ToolStripMenuItem("Open restore-data folder");
-            stateFolder.Click += (sender, args) => OpenStateFolder();
-
-            ToolStripMenuItem logsFolder = new ToolStripMenuItem("Open logs folder");
-            logsFolder.Click += (sender, args) => OpenLogsFolder();
-
-            ToolStripMenuItem about = new ToolStripMenuItem("About MacRando");
-            about.Click += (sender, args) => ShowAbout();
-
-            ToolStripMenuItem license = new ToolStripMenuItem("License (" + LicenseInfo.SpdxId + ")");
-            license.Click += (sender, args) => ShowLicense();
-
-            _restoreProblemMenuItem = new ToolStripMenuItem("Restore data problem...");
-            _restoreProblemMenuItem.Click += (sender, args) => ShowRestoreStateProblem();
-
-            _restoreAllMenuItem = new ToolStripMenuItem("Restore all pending profiles");
-            _restoreAllMenuItem.Click += async (sender, args) => await RestoreAllPendingAsync();
-            ToolStripMenuItem ipHistory = new ToolStripMenuItem("View IP change history");
-            ipHistory.Click += (sender, args) => ShowIpChangeHistory();
-            ToolStripMenuItem exportBundle = new ToolStripMenuItem("Export diagnostic bundle");
-            exportBundle.Click += async (sender, args) => await ExportDiagnosticBundleAsync();
-            ToolStripMenuItem exportCertificate = new ToolStripMenuItem("Export signing certificate (public)");
-            exportCertificate.Click += async (sender, args) => await ExportPublicCertificateAsync();
-
-            _exitMenuItem.Click += async (sender, args) => await ExitApplicationAsync();
-
-            _menu.Items.Add(open);
-            _menu.Items.Add(new ToolStripSeparator());
-            _versionMenuItem = new ToolStripMenuItem(AppInfo.ProductName + " " + AppInfo.Version) { Enabled = false };
-            _menu.Items.Add(_versionMenuItem);
-            _menu.Items.Add(_statusMenuItem);
-            _menu.Items.Add(_publicIpMenuItem);
-            _menu.Items.Add(_adaptersMenu);
-            _menu.Items.Add(_restoreMenu);
-            _menu.Items.Add(_vpnMenu);
-            _menu.Items.Add(new ToolStripSeparator());
-            _menu.Items.Add(_refreshMenuItem);
-            _menu.Items.Add(_diagnosticsMenuItem);
-            _menu.Items.Add(_ipPreflightMenuItem);
-            _menu.Items.Add(_deviceTrackingMenuItem);
-            _menu.Items.Add(_updateMenuItem);
-            _menu.Items.Add(_notificationCenterMenuItem);
-            _restoreProblemMenuItem.Visible = _restoreStateUnreadable;
-            _menu.Items.Add(_restoreProblemMenuItem);
-            _menu.Items.Add(stateFolder);
-            _menu.Items.Add(logsFolder);
-            _menu.Items.Add(new ToolStripSeparator());
-            _menu.Items.Add(_restoreAllMenuItem);
-            _menu.Items.Add(ipHistory);
-            _menu.Items.Add(exportBundle);
-            _menu.Items.Add(exportCertificate);
-            _menu.Items.Add(new ToolStripSeparator());
-            _menu.Items.Add(_startMinimizedMenuItem);
-            _menu.Items.Add(_startWithWindowsMenuItem);
-            _menu.Items.Add(_autoRandomizeMenuItem);
-            _menu.Items.Add(about);
-            _menu.Items.Add(license);
-            _menu.Items.Add(_exitMenuItem);
-        }
 
         private void WireFormEvents()
         {
@@ -2670,13 +2596,130 @@ namespace MacRando
             }
         }
 
+        /// <summary>
+        /// Reorganised into labelled sections. The previous menu was one flat list of
+        /// twenty-four items with no grouping, so the two items a user reaches for most,
+        /// opening the dashboard and restoring a pending adapter, were separated by a
+        /// dozen unrelated diagnostics and settings.
+        /// </summary>
+        private void BuildMenu()
+        {
+            ToolStripMenuItem open = new ToolStripMenuItem("Open dashboard");
+            open.Click += (sender, args) => _form.ShowDashboard();
+
+            _refreshMenuItem.Click += async (sender, args) => await SafeRefreshAsync();
+            _diagnosticsMenuItem.Click += async (sender, args) => await RunDiagnosticsAsync();
+            _ipPreflightMenuItem.Click += async (sender, args) => await RunIpPreflightAsync();
+            _deviceTrackingMenuItem.Click += async (sender, args) => await InspectDeviceTrackingAsync();
+            _updateMenuItem.Click += async (sender, args) => await CheckForUpdatesAsync();
+            _notificationCenterMenuItem.Click += (sender, args) => ShowNotificationCenter();
+            _startMinimizedMenuItem.Click += (sender, args) => ToggleStartMinimized();
+            _startWithWindowsMenuItem.Click += (sender, args) => ToggleStartWithWindows();
+            _autoRandomizeMenuItem.Click += (sender, args) => ToggleStartupRandomization();
+
+            ToolStripMenuItem stateFolder = new ToolStripMenuItem("Open restore-data folder");
+            stateFolder.Click += (sender, args) => OpenStateFolder();
+
+            ToolStripMenuItem logsFolder = new ToolStripMenuItem("Open logs folder");
+            logsFolder.Click += (sender, args) => OpenLogsFolder();
+
+            ToolStripMenuItem about = new ToolStripMenuItem("About MacRando");
+            about.Click += (sender, args) => ShowAbout();
+
+            ToolStripMenuItem license = new ToolStripMenuItem("License (" + LicenseInfo.SpdxId + ")");
+            license.Click += (sender, args) => ShowLicense();
+
+            _restoreProblemMenuItem = new ToolStripMenuItem("Restore data problem...");
+            _restoreProblemMenuItem.Click += (sender, args) => ShowRestoreStateProblem();
+
+            _restoreAllMenuItem = new ToolStripMenuItem("Restore all pending profiles");
+            _restoreAllMenuItem.Click += async (sender, args) => await RestoreAllPendingAsync();
+
+            ToolStripMenuItem ipHistory = new ToolStripMenuItem("View IP change history");
+            ipHistory.Click += (sender, args) => ShowIpChangeHistory();
+
+            ToolStripMenuItem exportBundle = new ToolStripMenuItem("Export diagnostic bundle");
+            exportBundle.Click += async (sender, args) => await ExportDiagnosticBundleAsync();
+
+            ToolStripMenuItem exportCertificate = new ToolStripMenuItem("Export signing certificate (public)");
+            exportCertificate.Click += async (sender, args) => await ExportPublicCertificateAsync();
+
+            _exitMenuItem.Click += async (sender, args) => await ExitApplicationAsync();
+
+            // Current state, at the top and not clickable. This is what the user reads
+            // before deciding anything, so it costs no clicks and cannot be misclicked.
+            _versionMenuItem = new ToolStripMenuItem(AppInfo.ProductName + " " + AppInfo.Version) { Enabled = false };
+            _menu.Items.Add(_versionMenuItem);
+            _menu.Items.Add(_statusMenuItem);
+            _menu.Items.Add(_publicIpMenuItem);
+            _menu.Items.Add(new ToolStripSeparator());
+
+            // The two things a user actually opens the app to do.
+            _menu.Items.Add(open);
+            _restoreProblemMenuItem.Visible = _restoreStateUnreadable;
+            _menu.Items.Add(_restoreProblemMenuItem);
+            _menu.Items.Add(_restoreMenu);
+            _menu.Items.Add(_restoreAllMenuItem);
+            _menu.Items.Add(_adaptersMenu);
+            _menu.Items.Add(_vpnMenu);
+            _menu.Items.Add(new ToolStripSeparator());
+
+            // Read-only reports. Grouped because none of them change anything, and that
+            // is worth being able to see at a glance before clicking one.
+            _menu.Items.Add(SectionHeader("Reports (read-only)"));
+            _menu.Items.Add(_refreshMenuItem);
+            _menu.Items.Add(_diagnosticsMenuItem);
+            _menu.Items.Add(_ipPreflightMenuItem);
+            _menu.Items.Add(_deviceTrackingMenuItem);
+            _menu.Items.Add(ipHistory);
+            _menu.Items.Add(exportBundle);
+            _menu.Items.Add(new ToolStripSeparator());
+
+            _menu.Items.Add(SectionHeader("Application"));
+            _menu.Items.Add(_updateMenuItem);
+            _menu.Items.Add(_notificationCenterMenuItem);
+            _menu.Items.Add(stateFolder);
+            _menu.Items.Add(logsFolder);
+            _menu.Items.Add(new ToolStripSeparator());
+
+            _menu.Items.Add(SectionHeader("Startup"));
+            _menu.Items.Add(_startMinimizedMenuItem);
+            _menu.Items.Add(_startWithWindowsMenuItem);
+            _menu.Items.Add(_autoRandomizeMenuItem);
+            _menu.Items.Add(new ToolStripSeparator());
+
+            _menu.Items.Add(about);
+            _menu.Items.Add(license);
+            _menu.Items.Add(exportCertificate);
+            _menu.Items.Add(new ToolStripSeparator());
+            _menu.Items.Add(_exitMenuItem);
+        }
+
+        /// <summary>
+        /// A non-clickable label used to title a group. It is a real menu item so it
+        /// cannot be mistaken for an action, and it is disabled so the keyboard and
+        /// pointer both pass over it.
+        /// </summary>
+        private static ToolStripMenuItem SectionHeader(string text)
+        {
+            var header = new ToolStripMenuItem(text) { Enabled = false };
+            header.Font = new Font(header.Font, FontStyle.Bold);
+            return header;
+        }
+
         private void RefreshMenus()
         {
-            _statusMenuItem.Text = IsAdministrator()
-                ? "Status: ready (administrator)"
-                : "Status: administrator permission required";
+            // The status block is the part of the menu a user reads first, so the three
+            // facts that decide what they do next are all on it rather than spread across
+            // submenus: whether the app can act at all, whether anything is left changed,
+            // and the public IP. The restore count is the important one, because a pending
+            // profile means an adapter is not in the state the user left it in.
+            int pending = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
+            bool elevated = IsAdministrator();
+            _statusMenuItem.Text = TrayMenuState.StatusText(pending, elevated);
+            _statusMenuItem.ForeColor = TrayMenuState.StatusColor(pending, elevated);
             _publicIpMenuItem.Text = "Public IP: " + _publicIp;
-            _notifyIcon.Text = TruncateNotifyText("MacRando - " + _publicIp);
+            _notifyIcon.Text = TruncateNotifyText(TrayMenuState.NotifyText(pending, elevated));
 
             _adaptersMenu.DropDownItems.Clear();
             bool allowDhcpIp = _form.AllowDhcpIpRandomization;
@@ -2779,9 +2822,7 @@ namespace MacRando
             {
                 int pendingCount = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
                 _restoreAllMenuItem.Enabled = !interactionBusy && pendingCount > 0;
-                _restoreAllMenuItem.Text = pendingCount > 0
-                    ? "Restore all pending profiles (" + pendingCount + ")"
-                    : "Restore all pending profiles";
+                _restoreAllMenuItem.Text = TrayMenuState.RestoreAllText(pendingCount);
             }
             int unreadNotifications = 0;
             if (_state.Notifications != null)

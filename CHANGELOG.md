@@ -1,5 +1,26 @@
 # MacRando Changelog
 
+## 1.9.0 - 2026.09
+
+### Changed
+
+- **The tray menu is now grouped into labelled sections.** It was a flat list of twenty-four items with no structure, so the two things a user opens MacRando to do, viewing an adapter and restoring a pending one, sat a dozen unrelated diagnostics and startup settings apart. The order is now: current state, then the primary actions, then a "Reports (read-only)" group, then application items, then startup settings, then About, License, and Exit last. Group titles are non-clickable menu items, so they cannot be mistaken for an action or clicked into doing nothing.
+- **The status line reports the pending restore count.** It previously read only "Status: ready (administrator)", which said nothing about whether the machine was in the state the user left it in. A pending restore is now called out in the text, not just implied by a menu item being enabled, because it is the only MacRando state with a consequence for the machine rather than just for the app. The count is in the words rather than the colour alone, since colour is invisible to a screen reader and to anyone who cannot distinguish amber from grey.
+- The status line is coloured amber when something needs restoring and red when administrator permission is missing. Not permanently coloured on purpose: a status line that is always coloured teaches a user to ignore the colour.
+- **The tray tooltip reports the pending count**, since it is often the only MacRando text visible at all. It stays inside the 63-character limit the notification area enforces.
+
+### Fixed
+
+- The menu's `BuildMenu` had been left in a state where the item wiring and the item order were interleaved through a single flat list. Reordering it by hand meant finding the right line in a long block and risking dropping an item, so the two concerns are now separate: one place declares every item and wires it, another places them.
+
+### Tests
+
+- The tray menu is now covered. It is read by reflection because the menu is built in the constructor and would otherwise need a live `ApplicationContext` with a real `NotifyIcon`.
+- Every item the old flat menu had is asserted to still be reachable, so a reorganisation cannot silently remove a feature. The test failed on its first run against a stale item name, which is the class of mistake worth catching.
+- The ordering itself is asserted: the version and status come first, the primary actions sit above the reports and settings groups, and Exit is last.
+- Section headers are identified by bold font rather than by their text, because a real report item also ends in a parenthesis and matching on that would either miss a header or flag a report. The test also asserts a real action is not styled as a header, which is the failure a bold-everything refactor would introduce.
+- The status wording is tested for singular and plural forms, for the permission case outranking the pending count, for the count appearing in the text, and for the tooltip staying inside the notification area's length limit.
+
 ## 1.8.0 - 2026.09
 
 ### Added

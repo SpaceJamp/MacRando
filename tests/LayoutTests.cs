@@ -37,6 +37,9 @@ internal static class LayoutTests
             TheAdapterListIsAlwaysUsable();
             TheListPaneIsNotClippedAtHighDpi();
             NothingOverlapsUnderHighDpiScaling();
+            TheTrayMenuIsSensiblyOrdered();
+            SectionHeadersAreNotClickable();
+            TrayStatusWording();
             Console.WriteLine("layout-tests=OK;checks=" + _checks);
             return 0;
         }
@@ -93,6 +96,190 @@ internal static class LayoutTests
             walk = walk.Parent as Control;
         }
         return visible;
+    }
+
+    /// <summary>
+    /// Structure of the tray menu, read by reflection because the menu is built in the
+    /// constructor and would otherwise need a running ApplicationContext with a real
+    /// NotifyIcon.
+    ///
+    /// What is asserted is the property that actually matters: an action a user reaches
+    /// for routinely is near the top, the status line is at the very top, and a group
+    /// header is a non-clickable label rather than something that looks like an action.
+    /// </summary>
+    private static void TrayStatusWording()
+    {
+        Check(TrayMenuState.StatusText(0, true) == "Ready",
+            "with nothing pending and permission, the status is simply ready");
+        Check(TrayMenuState.StatusText(1, true) == "Ready - 1 adapter needs restoring",
+            "one pending adapter is singular, not \"1 adapters\"");
+        Check(TrayMenuState.StatusText(2, true) == "Ready - 2 adapters need restoring",
+            "several pending adapters are plural");
+        Check(TrayMenuState.StatusText(0, false) == "Administrator permission required",
+            "without permission the status must say so rather than claiming to be ready");
+        Check(TrayMenuState.StatusText(3, false) == "Administrator permission required",
+            "the permission problem outranks the pending count: nothing can be done about either");
+
+        // The count has to be in the text, not only in the colour, because the colour is
+        // invisible to a screen reader and to anyone who cannot distinguish amber.
+        for (int count = 1; count <= 12; count++)
+        {
+            Check(TrayMenuState.StatusText(count, true).Contains(count.ToString()),
+                "the status text should state the pending count of " + count);
+        }
+
+        Check(TrayMenuState.NotifyText(0, true) == "MacRando - ready", "a clean tooltip is short");
+        Check(TrayMenuState.NotifyText(1, true).Contains("1 adapter needs restoring"),
+            "the tooltip should surface a pending restore");
+        Check(TrayMenuState.NotifyText(1, true).Length <= 63,
+            "the notify icon tooltip is truncated past 63 characters");
+
+        Check(TrayMenuState.RestoreAllText(0) == "Restore all pending profiles",
+            "with nothing pending the count is not shown");
+        Check(TrayMenuState.RestoreAllText(2) == "Restore all pending profiles (2)",
+            "with pending profiles the count is shown");
+
+        // The colour must actually change, or the emphasis is decoration.
+        Check(TrayMenuState.StatusColor(0, true) == SystemColors.ControlText,
+            "a clean status uses the ordinary text colour");
+        Check(TrayMenuState.StatusColor(2, true) != SystemColors.ControlText,
+            "a pending restore should be visually distinct");
+        Check(TrayMenuState.StatusColor(0, false) != TrayMenuState.StatusColor(2, true),
+            "the permission problem should look different from a pending restore");
+    }
+
+    private static void TheTrayMenuIsSensiblyOrdered()
+    {
+        RunOnUiThread(delegate
+        {
+            using (TrayContext context = new TrayContext())
+            {
+                ContextMenuStrip menu = (ContextMenuStrip)typeof(TrayContext)
+                    .GetField("_menu", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(context);
+                Check(menu != null, "the tray context should own a menu");
+
+                var labels = new List<string>();
+                foreach (ToolStripItem item in menu.Items)
+                {
+                    ToolStripSeparator separator = item as ToolStripSeparator;
+                    if (separator != null)
+                    {
+                        labels.Add("---");
+                        continue;
+                    }
+                    labels.Add(item.Text);
+                }
+
+                Func<string, int> indexOf = delegate(string text)
+                {
+                    for (int i = 0; i < labels.Count; i++)
+                    {
+                        if (string.Equals(labels[i], text, StringComparison.Ordinal))
+                        {
+                            return i;
+                        }
+                    }
+                    return -1;
+                };
+
+                // Nothing may be lost in the reorganisation. Every item the old flat menu
+                // had has to still be reachable, or the tidy-up silently removed a feature.
+                foreach (string required in new[]
+                {
+                    "Open dashboard", "Adapters", "Windows VPN profiles", "Restore saved adapter",
+                    "Restore all pending profiles", "Refresh", "Run read-only diagnostics",
+                    "Run read-only IP preflight", "Inspect device tracking identifiers (read-only)",
+                    "Check for updates", "Notification center", "Open restore-data folder",
+                    "Open logs folder", "Start minimized to tray", "Start with Windows",
+                    "Randomize MAC on startup (risky)", "About MacRando", "Exit"
+                })
+                {
+                    Check(indexOf(required) >= 0, "the tray menu lost the item \"" + required + "\"");
+                }
+
+                // The version and status lines come first: they are the only items that
+                // need no click to be useful.
+                Check(labels.Count > 2, "the menu should have items");
+                Check(labels[0].StartsWith("MacRando ", StringComparison.Ordinal),
+                    "the version should be the first line, but it is \"" + labels[0] + "\"");
+                Check(indexOf("Status") < 0 && labels[1] != "---",
+                    "the status line should follow the version directly");
+                Check(labels[1] == "---" || !labels[1].StartsWith("Adapters", StringComparison.Ordinal),
+                    "a section header should separate the status block from the actions");
+
+                // Open dashboard and the restore actions are what a user comes for. They
+                // must be above the reports and settings groups.
+                int openIndex = indexOf("Open dashboard");
+                int refreshIndex = indexOf("Refresh");
+                int reportsIndex = indexOf("Reports (read-only)");
+                Check(openIndex >= 0 && openIndex < reportsIndex,
+                    "Open dashboard should be above the reports group");
+                Check(refreshIndex > reportsIndex,
+                    "Refresh belongs in the reports group, not with the primary actions");
+
+                int notificationIndex = indexOf("Notification center");
+                Check(notificationIndex > reportsIndex,
+                    "Notification center belongs in the application group, above the reports");
+
+                int exitIndex = indexOf("Exit");
+                Check(exitIndex > 0, "Exit should be present");
+                Check(exitIndex == labels.Count - 1,
+                    "Exit should be the last item, but it is at " + exitIndex + " of " + labels.Count);
+            }
+        });
+    }
+
+    private static void SectionHeadersAreNotClickable()
+    {
+        RunOnUiThread(delegate
+        {
+            using (TrayContext context = new TrayContext())
+            {
+                ContextMenuStrip menu = (ContextMenuStrip)typeof(TrayContext)
+                    .GetField("_menu", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(context);
+                // Identified by bold font and disabled state rather than by the text: a real
+                // report item also ends in a parenthesis, so matching on that would either
+                // miss a header or flag a report.
+                int headers = 0;
+                foreach (ToolStripItem item in menu.Items)
+                {
+                    ToolStripMenuItem menuItem = item as ToolStripMenuItem;
+                    if (menuItem == null)
+                    {
+                        continue;
+                    }
+                    bool bold = menuItem.Font != null && menuItem.Font.Bold;
+                    if (!bold)
+                    {
+                        continue;
+                    }
+                    headers++;
+                    // A header that is enabled looks exactly like an action, and clicking
+                    // it would do nothing, which is worse than not having it.
+                    Check(!menuItem.Enabled,
+                        "the section header \"" + menuItem.Text + "\" should not be clickable");
+                    Check(menuItem.Text.Length > 0, "a section header should have text");
+                }
+                Check(headers >= 3, "the menu should have at least three section headers, found " + headers);
+
+                // A real action must not be bold, or it would read as a group title.
+                foreach (ToolStripItem item in menu.Items)
+                {
+                    ToolStripMenuItem menuItem = item as ToolStripMenuItem;
+                    if (menuItem == null || menuItem.Font == null)
+                    {
+                        continue;
+                    }
+                    if (menuItem.Text == "Open dashboard" || menuItem.Text == "Refresh")
+                    {
+                        Check(!menuItem.Font.Bold,
+                            "\"" + menuItem.Text + "\" is an action and should not be styled as a header");
+                    }
+                }
+            }
+        });
     }
 
     private static List<Control> All(Control root)

@@ -39,13 +39,17 @@ $sources = @(
     (Join-Path $root 'tests\RetentionTests.cs'),
     (Join-Path $root 'src\Accessibility.cs'),
     (Join-Path $root 'tests\AccessibilityTests.cs'),
-    (Join-Path $root 'tests\LayoutTests.cs')
+    (Join-Path $root 'tests\LayoutTests.cs'),
+    (Join-Path $root 'src\TrayContext.cs'),
+    (Join-Path $root 'src\TrayMenuState.cs')
 )
 $references = @(
     '/reference:System.dll',
     '/reference:System.Core.dll',
     '/reference:System.Drawing.dll',
     '/reference:System.Net.Http.dll',
+    '/reference:System.IO.Compression.dll',
+    '/reference:System.IO.Compression.FileSystem.dll',
     '/reference:System.Security.dll',
     '/reference:System.Web.Extensions.dll',
     '/reference:System.Windows.Forms.dll'

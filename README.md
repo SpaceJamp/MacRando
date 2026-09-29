@@ -134,6 +134,29 @@ An optional Inno Setup template is included at `installer.iss`.
 9. Open **Notification center** from the tray or Safety & Status to search recent notifications, filter by severity, copy details, open the affected adapter, or retry/restore an operation. Popup actions include **Open dashboard**, **Restore now**, **Retry**, **Diagnostics**, and **Dismiss**.
 10. Run **IP preflight (read-only)** before a live local-IP change. It reports the current and proposed address, prefix, DHCP plan, gateway route plan, DNS plan, and a per-setting list of what would change versus what would be preserved, without changing adapter settings.
 
+## Tray menu
+
+The notification-area menu is grouped so the items you reach for are not buried:
+
+| Group | Contains |
+|---|---|
+| *(top, not clickable)* | version, status line, public IP |
+| *(primary actions)* | Open dashboard, restore a saved adapter, restore all pending, Adapters, VPN profiles |
+| **Reports (read-only)** | Refresh, diagnostics, IP preflight, device tracking, IP change history, diagnostic bundle |
+| **Application** | Check for updates, Notification center, restore-data folder, logs folder |
+| **Startup** | Start minimized to tray, Start with Windows, Randomize MAC on startup |
+| *(bottom)* | About, License, export signing certificate, Exit |
+
+Group titles are disabled menu items, so they look like headings and cannot be clicked.
+
+The **status line** is the one piece of text that needs no click to be useful, so it carries the state that decides what you do next:
+
+- `Ready` — nothing outstanding.
+- `Ready - 2 adapters need restoring` — amber, and the count is in the words as well as implied by the colour. This is the only state with a consequence for your machine rather than just for the app, because it means an adapter is not in the configuration you left it in.
+- `Administrator permission required` — red, and it takes priority over the pending count, since nothing can be done about either without elevation.
+
+The same information appears in the tray tooltip, which is often the only MacRando text visible at all.
+
 ## Recovery after a crash or forced termination
 
 If MacRando is killed, crashes, or loses power mid-change, the saved restore profile survives. Recover with either of these:
@@ -382,6 +405,7 @@ Unless required by applicable law or agreed to in writing, the software is provi
 - `src/DeviceTrackingService.cs` — read-only device tracking and diagnostic data inspection.
 - `src/RetentionPolicy.cs` — bounded on-disk footprint for rotated logs and diagnostic bundles.
 - `src/Accessibility.cs` — accessible names, roles, and the high-contrast palette.
+- `src/TrayMenuState.cs` — the tray menu's status wording, colour, and tooltip.
 - `src/TrayContext.cs` — tray menu and operation workflow.
 - `src/NotificationPopup.cs` — non-activating in-app notifications with the application icon.
 - `src/NotificationCenterForm.cs` — searchable notification history and notification preferences.
