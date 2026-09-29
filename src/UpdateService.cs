@@ -155,6 +155,12 @@ namespace MacRando
             HttpClient client = new HttpClient();
             client.Timeout = TimeSpan.FromSeconds(12);
             client.DefaultRequestHeaders.UserAgent.ParseAdd(AppInfo.ProductName + "/" + AppInfo.Version);
+            // A cached manifest can hide a release published moments ago, which would leave
+            // a user stuck on an older build with no indication why.
+            client.DefaultRequestHeaders.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue
+            {
+                NoCache = true
+            };
             return client;
         }
 

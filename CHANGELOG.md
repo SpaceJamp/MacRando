@@ -1,5 +1,13 @@
 # MacRando Changelog
 
+## 1.4.2 - 2026.09
+
+### Fixed
+
+- **The updater could be told "up to date" when a newer release already existed.** The manifest was hosted as a file on `main` and served through a CDN that lags a few minutes behind a push. Immediately after publishing 1.4.1, the committed manifest read 1.4.1 while the URL still returned 1.4.0, so a user on 1.4.0 would have been told there was nothing to install. The recommended manifest URL is now the release asset at `releases/latest/download/update.json`, which only changes when a release is published, and the client sends `Cache-Control: no-cache` for the manifest request.
+
+## 1.4.1 - 2026.09
+
 ## 1.4.1 - 2026.09
 
 ### Changed

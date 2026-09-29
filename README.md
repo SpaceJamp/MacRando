@@ -211,13 +211,13 @@ Install is refused, with the reason shown in the report, when the download is no
 
 Rollback covers a build that fails to *start*. A build that starts and later fails during an adapter refresh is left in place, because replacing the executable over a transient network error would cause more harm than it solves.
 
-The manifest for this repository is served from:
+The manifest is published as an asset on each GitHub release. Point the updater at the **latest release** copy rather than a file on `main`:
 
 ```text
-https://raw.githubusercontent.com/SpaceJamp/MacRando/main/update.json
+https://github.com/SpaceJamp/MacRando/releases/latest/download/update.json
 ```
 
-`raw.githubusercontent.com` is only reachable anonymously for a **public** repository. If the repository stays private, the in-app updater cannot read the manifest and an unauthenticated HTTPS host is required instead.
+A `raw.githubusercontent.com` URL pointing at `main` also works, but branch files are served through a CDN that can lag a few minutes behind a push. During that window a user would be told they are up to date while a newer release already exists. The release asset only changes when a release is actually published, and the client also sends `Cache-Control: no-cache` for the same reason.
 
 ### Publishing a release
 
