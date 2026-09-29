@@ -37,6 +37,7 @@ namespace MacRando
         private readonly NumericUpDown _duration;
         private readonly TextBox _updateUrlBox;
         private readonly TextBox _signerBox;
+        private Label _footerLabel;
         private bool _allowClose;
         private bool _darkMode;
 
@@ -117,8 +118,8 @@ namespace MacRando
             _quietStart = MakeHourControl(_settings.NotificationQuietHoursStartHour);
             _quietEnd = MakeHourControl(_settings.NotificationQuietHoursEndHour);
             _duration = new NumericUpDown { Minimum = 2, Maximum = 60, Value = Math.Max(2, Math.Min(60, _settings.NotificationDurationSeconds)), Width = 58 };
-            _updateUrlBox = new TextBox { Text = _settings.UpdateManifestUrl ?? string.Empty, Width = 300 };
-            _signerBox = new TextBox { Text = _settings.ExpectedSignerThumbprint ?? string.Empty, Width = 190 };
+            _updateUrlBox = new TextBox { Text = _settings.UpdateManifestUrl ?? string.Empty, Width = 250, Height = 26, Margin = new Padding(2, 4, 2, 4) };
+            _signerBox = new TextBox { Text = _settings.ExpectedSignerThumbprint ?? string.Empty, Width = 150, Height = 26, Margin = new Padding(2, 4, 2, 4) };
 
             BuildLayout();
             WireEvents();
@@ -166,6 +167,11 @@ namespace MacRando
             _detailsBox.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.FromArgb(248, 250, 252);
             _detailsBox.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59);
             ApplyThemeToChildren(this, darkMode);
+            if (_footerLabel != null)
+            {
+                // Muted, but still above 4.5:1 against the themed background in both modes.
+                _footerLabel.ForeColor = darkMode ? Color.FromArgb(148, 163, 184) : Color.FromArgb(71, 85, 105);
+            }
             RefreshList();
         }
 
@@ -244,41 +250,61 @@ namespace MacRando
             detailsPanel.Controls.Add(actions, 0, 1);
             split.Panel2.Controls.Add(detailsPanel);
 
-            var settings = new GroupBox { Text = "Notification preferences", Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(8) };
-            var settingsLayout = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, AutoSize = true };
-            settingsLayout.Controls.Add(_notificationsEnabled);
-            settingsLayout.Controls.Add(_soundEnabled);
-            settingsLayout.Controls.Add(_collapseEnabled);
-            settingsLayout.Controls.Add(_quietEnabled);
-            settingsLayout.Controls.Add(new Label { Text = "From", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
-            settingsLayout.Controls.Add(_quietStart);
-            settingsLayout.Controls.Add(new Label { Text = "to", AutoSize = true, Margin = new Padding(4, 7, 2, 0) });
-            settingsLayout.Controls.Add(_quietEnd);
-            settingsLayout.Controls.Add(new Label { Text = "Popup seconds", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
-            settingsLayout.Controls.Add(_duration);
-            settingsLayout.Controls.Add(new Label { Text = "Update manifest URL", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
-            settingsLayout.Controls.Add(_updateUrlBox);
-            settingsLayout.Controls.Add(new Label { Text = "Expected signer", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
-            settingsLayout.Controls.Add(_signerBox);
+            // Two explicit rows instead of one wrapping flow. A GroupBox does not reliably
+            // grow around a single wrapping FlowLayoutPanel, which clipped the update fields.
+            var settings = new GroupBox { Text = "Notification preferences", Dock = DockStyle.Bottom, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8) };
+            var settingsRows = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 1,
+                RowCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = Padding.Empty
+            };
+            settingsRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            settingsRows.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            settingsRows.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var notificationRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
+            notificationRow.Controls.Add(_notificationsEnabled);
+            notificationRow.Controls.Add(_soundEnabled);
+            notificationRow.Controls.Add(_collapseEnabled);
+            notificationRow.Controls.Add(_quietEnabled);
+            notificationRow.Controls.Add(new Label { Text = "From", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
+            notificationRow.Controls.Add(_quietStart);
+            notificationRow.Controls.Add(new Label { Text = "to", AutoSize = true, Margin = new Padding(4, 7, 2, 0) });
+            notificationRow.Controls.Add(_quietEnd);
+            notificationRow.Controls.Add(new Label { Text = "Popup seconds", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
+            notificationRow.Controls.Add(_duration);
+            settingsRows.Controls.Add(notificationRow, 0, 0);
+
+            // Wraps rather than clips on a narrow window; the group auto-sizes to fit.
+            var updateRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
+            updateRow.Controls.Add(new Label { Text = "Update manifest URL", AutoSize = true, Margin = new Padding(0, 7, 2, 0) });
+            updateRow.Controls.Add(_updateUrlBox);
+            updateRow.Controls.Add(new Label { Text = "Expected signer", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
+            updateRow.Controls.Add(_signerBox);
             var apply = MakeButton("Apply preferences", true);
             apply.Click += (sender, args) => ApplySettings();
-            settingsLayout.Controls.Add(apply);
+            updateRow.Controls.Add(apply);
             var checkUpdates = MakeButton("Check for updates", false);
             checkUpdates.Click += (sender, args) => RaiseCheckUpdates();
-            settingsLayout.Controls.Add(checkUpdates);
+            updateRow.Controls.Add(checkUpdates);
             var sendTest = MakeButton("Send test notification", false);
             sendTest.Click += (sender, args) => RaiseSendTestNotification();
-            settingsLayout.Controls.Add(sendTest);
-            settings.Controls.Add(settingsLayout);
+            updateRow.Controls.Add(sendTest);
+            settingsRows.Controls.Add(updateRow, 0, 1);
+            settings.Controls.Add(settingsRows);
 
             var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
             var versionLabel = new Label
             {
                 Text = AppInfo.ProductName + " " + AppInfo.DisplayVersion + "  •  " + LicenseInfo.Notice + "  •  notifications are sanitized before storage",
                 AutoSize = true,
-                ForeColor = Color.FromArgb(100, 116, 139),
                 Margin = Padding.Empty
             };
+            _footerLabel = versionLabel;
             footer.Controls.Add(versionLabel);
 
             root.Controls.Add(toolbar, 0, 0);
@@ -514,16 +540,21 @@ namespace MacRando
 
         private static Button MakeButton(string text, bool primary)
         {
-            return new Button
+            Button button = new Button
             {
                 Text = text,
                 AutoSize = true,
                 MinimumSize = new Size(84, 30),
-                FlatStyle = primary ? FlatStyle.Flat : FlatStyle.Standard,
+                FlatStyle = FlatStyle.Flat,
                 BackColor = primary ? Color.FromArgb(37, 99, 235) : SystemColors.Control,
                 ForeColor = primary ? Color.White : SystemColors.ControlText,
-                Margin = new Padding(4)
+                Margin = new Padding(4),
+                Tag = primary
             };
+            // Without this the visual style ignores BackColor, so a themed button
+            // cannot guarantee a readable foreground/background pairing.
+            button.UseVisualStyleBackColor = false;
+            return button;
         }
 
         private static CheckBox MakeCheckBox(string text, bool value)
@@ -556,14 +587,46 @@ namespace MacRando
                 }
                 else if (control is Button)
                 {
-                    control.ForeColor = darkMode ? Color.White : SystemColors.ControlText;
+                    Button button = (Button)control;
+                    bool primary = button.Tag is bool && (bool)button.Tag;
+                    // Both colors must move together. Setting only ForeColor here is what
+                    // produced white text on a light system button in dark mode.
+                    if (primary)
+                    {
+                        button.BackColor = Color.FromArgb(37, 99, 235);
+                        button.ForeColor = Color.White;
+                    }
+                    else
+                    {
+                        button.BackColor = darkMode ? Color.FromArgb(30, 41, 59) : Color.FromArgb(241, 245, 249);
+                        button.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(15, 23, 42);
+                    }
+                    button.FlatStyle = FlatStyle.Flat;
+                    button.UseVisualStyleBackColor = false;
+                    button.FlatAppearance.BorderColor = darkMode ? Color.FromArgb(71, 85, 105) : Color.FromArgb(203, 213, 225);
+                    button.FlatAppearance.MouseOverBackColor = darkMode ? Color.FromArgb(51, 65, 85) : Color.FromArgb(219, 234, 254);
                 }
                 else if (control is ListView)
                 {
                     control.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.White;
                     control.ForeColor = darkMode ? Color.White : Color.FromArgb(15, 23, 42);
                 }
-                else if (control is ComboBox || control is NumericUpDown || control is GroupBox || control is TableLayoutPanel || control is FlowLayoutPanel || control is SplitContainer)
+                else if (control is ComboBox)
+                {
+                    ComboBox combo = (ComboBox)control;
+                    // The background must be themed too, otherwise the selected item is
+                    // white text on a white box in dark mode.
+                    combo.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.White;
+                    combo.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(15, 23, 42);
+                    combo.FlatStyle = FlatStyle.Flat;
+                }
+                else if (control is NumericUpDown)
+                {
+                    NumericUpDown numeric = (NumericUpDown)control;
+                    numeric.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.White;
+                    numeric.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(15, 23, 42);
+                }
+                else if (control is GroupBox || control is TableLayoutPanel || control is FlowLayoutPanel || control is SplitContainer)
                 {
                     control.ForeColor = darkMode ? Color.White : SystemColors.ControlText;
                 }

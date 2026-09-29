@@ -23,15 +23,21 @@ $sources = @(
     (Join-Path $root 'src\DiagnosticsService.cs'),
     (Join-Path $root 'src\UpdateService.cs'),
     (Join-Path $root 'src\LicenseInfo.cs'),
+    (Join-Path $root 'src\NotificationPopup.cs'),
+    (Join-Path $root 'src\NotificationCenterForm.cs'),
+    (Join-Path $root 'src\DashboardForm.cs'),
     (Join-Path $root 'tests\NetworkServiceMockTests.cs'),
-    (Join-Path $root 'tests\UpgradeRegressionTests.cs')
+    (Join-Path $root 'tests\UpgradeRegressionTests.cs'),
+    (Join-Path $root 'tests\ContrastTests.cs')
 )
 $references = @(
     '/reference:System.dll',
     '/reference:System.Core.dll',
+    '/reference:System.Drawing.dll',
     '/reference:System.Net.Http.dll',
     '/reference:System.Security.dll',
-    '/reference:System.Web.Extensions.dll'
+    '/reference:System.Web.Extensions.dll',
+    '/reference:System.Windows.Forms.dll'
 )
 & $compiler /nologo /target:exe /platform:anycpu /langversion:5 /out:$output $references $sources
 if ($LASTEXITCODE -ne 0) {

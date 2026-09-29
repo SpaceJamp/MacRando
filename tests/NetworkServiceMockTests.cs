@@ -70,6 +70,7 @@ internal static class NetworkServiceMockTests
         }
     }
 
+    [STAThread]
     private static int Main()
     {
         try
@@ -206,6 +207,11 @@ internal static class NetworkServiceMockTests
             if (upgradeResult != 0)
             {
                 return upgradeResult;
+            }
+            int contrastResult = ContrastTests.Run();
+            if (contrastResult != 0)
+            {
+                return contrastResult;
             }
             return 0;
         }
