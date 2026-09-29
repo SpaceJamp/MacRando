@@ -6,6 +6,8 @@ Repository: <https://github.com/SpaceJamp/MacRando>
 
 Releases and the update manifest are published from that repository.
 
+MacRando is inspired by the general concept of MAC-address randomizing tools such as TMAC. It is an independent implementation and is not affiliated with, endorsed by, or derived from any other project.
+
 It can:
 
 - Generate and apply a locally administered, unicast random MAC address.
@@ -202,6 +204,14 @@ The state file and its backup are encrypted with Windows DPAPI for the current u
 
 The diagnostics report checks adapter discovery, the selected adapter's `NetworkAddress` support, IP/DHCP visibility, elevation, and VPN profile enumeration without changing adapter settings.
 
+## License
+
+Copyright (c) 2026 SpaceJamp
+
+MacRando is licensed under the [Apache License, Version 2.0](LICENSE). The full license text is in `LICENSE` and is also included in every release archive and installation, as required by section 4(a) of the license.
+
+Unless required by applicable law or agreed to in writing, the software is provided on an **AS IS** basis, without warranties or conditions of any kind. MacRando modifies live network adapter settings and requires administrator rights, so you are responsible for testing it on a network you are permitted to reconfigure and for complying with your local policies and applicable laws.
+
 ## Project layout
 
 - `src/NetworkService.cs` — adapter discovery, Windows PowerShell commands, IP selection, VPN actions, and public-IP lookup.
@@ -221,6 +231,7 @@ The diagnostics report checks adapter discovery, the selected adapter's `Network
 - `package.ps1` — versioned release archive builder with optional signing.
 - `publish-update.ps1` — generates and verifies the `update.json` release manifest.
 - `CHANGELOG.md` — release notes and change history.
+- `LICENSE` — Apache License 2.0.
 - `sign.ps1` — SHA-256 Authenticode signing helper.
 - `installer.iss` — optional Inno Setup installer template.
 - `.github/workflows/ci.yml` — build and mock-test checks on every push and pull request.

@@ -32,7 +32,8 @@ $files = @(
     (Join-Path $root 'bin\MacRando.ico'),
     (Join-Path $root 'bin\MacRandoTray.ico'),
     (Join-Path $root 'README.md'),
-    (Join-Path $root 'CHANGELOG.md')
+    (Join-Path $root 'CHANGELOG.md'),
+    (Join-Path $root 'LICENSE')
 )
 foreach ($file in $files) {
     if (-not (Test-Path $file)) {

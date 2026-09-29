@@ -26,7 +26,7 @@ jobs:
         shell: powershell
         run: |
           $version = '${{ github.event.inputs.version }}'
-          if ([string]::IsNullOrWhiteSpace($version)) { $version = '${{ github.ref_name }}'.TrimStart('v') }
+          if ([string]::IsNullOrWhiteSpace($version)) { $version = '${{ github.ref_name }}' -replace '^v', '' }
           if ([string]::IsNullOrWhiteSpace($version)) { throw 'Could not determine the release version' }
           "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "tag=v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -46,31 +46,53 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.value }}
+          SHA: ${{ github.sha }}
         run: |
-          $notes = @"
-          Automated build for MacRando $VERSION.
+          $ErrorActionPreference = 'Continue'
+          & gh --version
+
+          # Authenticode applies to the executable, and the signing certificate is not
+          # available on GitHub-hosted runners, so this build is unsigned on purpose.
+          $signed   = "dist/MacRando-$env:VERSION.zip"
+          $unsigned = "dist/MacRando-$env:VERSION-unsigned.zip"
+          if (-not (Test-Path $signed)) { throw "Expected build artifact is missing: $signed" }
+          Copy-Item $signed $unsigned -Force
+          Write-Host "Uploading $unsigned ($((Get-Item $unsigned).Length) bytes)"
+
+          # Single-quoted so PowerShell never interprets markdown backticks or $().
+          $notes = @'
+          Automated build for MacRando __VERSION__.
 
           The attached archive is **unsigned**. GitHub-hosted runners do not have the
           MacRando Development signing certificate, so the signed release artifacts are
           produced on the maintainer's machine:
 
-          ```
-          .\package.ps1 -SignThumbprint 8804295F8D8615DC1D137720847672ABA1342FEC
-          .\publish-update.ps1 -Version $VERSION -Repository SpaceJamp/MacRando
-          ```
+              .\package.ps1 -SignThumbprint 8804295F8D8615DC1D137720847672ABA1342FEC
+              .\publish-update.ps1 -Version __VERSION__ -Repository SpaceJamp/MacRando
 
-          Upload the signed ``MacRando-$VERSION.zip`` and ``update.json`` to this release to
+          Upload the signed MacRando-__VERSION__.exe and update.json to this release to
           activate the in-app **Check for updates** feature.
-          "@
-          $signed   = "dist\MacRando-$VERSION.zip"
-          $unsigned = "dist\MacRando-$VERSION-unsigned.zip"
-          Copy-Item $signed $unsigned -Force
-          $ghArgs = @('release', 'create', $TAG, $unsigned,
-                      '--repo', $env:GITHUB_REPOSITORY,
-                      '--title', "MacRando $VERSION",
-                      '--notes', $notes)
-          & gh @ghArgs
-          if ($LASTEXITCODE -ne 0) {
-            & gh release upload $TAG $unsigned --repo $env:GITHUB_REPOSITORY --clobber
-            if ($LASTEXITCODE -ne 0) { throw "gh release create failed with exit code $LASTEXITCODE" }
+          '@
+          $notes = $notes.Replace('__VERSION__', $env:VERSION).Trim()
+
+          & gh release view $env:TAG --repo $env:GITHUB_REPOSITORY 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $env:TAG already exists; uploading the unsigned build to it."
+            & gh release upload $env:TAG $unsigned --repo $env:GITHUB_REPOSITORY --clobber 2>&1 |
+              ForEach-Object { Write-Host $_ }
+          } else {
+            Write-Host "Creating release $env:TAG at $env:SHA"
+            $ghArgs = @(
+              'release', 'create', $env:TAG, $unsigned,
+              '--repo', $env:GITHUB_REPOSITORY,
+              '--target', $env:SHA,
+              '--title', "MacRando $env:VERSION",
+              '--notes', $notes,
+              '--generate-notes'
+            )
+            & gh @ghArgs 2>&1 | ForEach-Object { Write-Host $_ }
           }
+          if ($LASTEXITCODE -ne 0) {
+            throw "gh release step failed with exit code $LASTEXITCODE for tag $env:TAG"
+          }
+          Write-Host 'Release step completed.'
