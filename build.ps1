@@ -12,6 +12,7 @@ $outputFolder = Join-Path $root 'bin'
 $outputPath = Join-Path $outputFolder 'MacRando.exe'
 $appIconPath = Join-Path $root 'assets\MacRando.ico'
 $trayIconPath = Join-Path $root 'assets\MacRandoTray.ico'
+$licensePath = Join-Path $root 'LICENSE'
 
 $compilerCandidates = @(
     (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'),
@@ -47,6 +48,11 @@ $arguments = @(
 )
 if (Test-Path $appIconPath) {
     $arguments += ('/win32icon:' + $appIconPath)
+}
+# Embed the license so the application can always show the full text offline,
+# even when the LICENSE file is not next to the executable.
+if (Test-Path $licensePath) {
+    $arguments += ('/resource:' + $licensePath + ',' + 'MacRando.LICENSE.txt')
 }
 if ($DebugBuild) {
     $arguments += '/debug:full'

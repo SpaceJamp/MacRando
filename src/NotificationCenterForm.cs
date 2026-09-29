@@ -270,7 +270,7 @@ namespace MacRando
             var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
             var versionLabel = new Label
             {
-                Text = AppInfo.ProductName + " " + AppInfo.DisplayVersion + "  •  Apache-2.0  •  notifications are sanitized before storage",
+                Text = AppInfo.ProductName + " " + AppInfo.DisplayVersion + "  •  " + LicenseInfo.Notice + "  •  notifications are sanitized before storage",
                 AutoSize = true,
                 ForeColor = Color.FromArgb(100, 116, 139),
                 Margin = Padding.Empty

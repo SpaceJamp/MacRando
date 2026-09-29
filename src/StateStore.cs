@@ -225,6 +225,7 @@ namespace MacRando
             state.Presets = NormalizePresets(state.Presets);
             state.History = NormalizeHistory(state.History);
             state.Notifications = NormalizeNotifications(state.Notifications);
+            state.IpChangeHistory = NormalizeIpChangeHistory(state.IpChangeHistory);
             return state;
         }
 
@@ -301,12 +302,55 @@ namespace MacRando
                     entry.Action = AppLogger.Sanitize(entry.Action);
                     entry.Details = AppLogger.Sanitize(entry.Details);
                     entry.Severity = NotificationKinds.Normalize(entry.Severity);
+                    entry.RetryKind = RetryKinds.Normalize(entry.RetryKind);
+                    if (entry.RetryGenerateRandomMac)
+                    {
+                        // A random retry must not carry a stale manual address.
+                        entry.RetryRequestedMac = null;
+                    }
+                    else
+                    {
+                        entry.RetryRequestedMac = AppLogger.Sanitize(entry.RetryRequestedMac);
+                    }
                     normalized.Add(entry);
                 }
             }
             if (normalized.Count > 100)
             {
                 normalized.RemoveRange(0, normalized.Count - 100);
+            }
+            return normalized;
+        }
+
+        private static List<IpChangeRecord> NormalizeIpChangeHistory(List<IpChangeRecord> history)
+        {
+            var normalized = new List<IpChangeRecord>();
+            if (history != null)
+            {
+                foreach (IpChangeRecord record in history)
+                {
+                    if (record == null)
+                    {
+                        continue;
+                    }
+                    record.RecordId = string.IsNullOrWhiteSpace(record.RecordId)
+                        ? Guid.NewGuid().ToString("N")
+                        : record.RecordId;
+                    record.AdapterKey = AppLogger.Sanitize(record.AdapterKey);
+                    record.AdapterName = AppLogger.Sanitize(record.AdapterName);
+                    record.OriginalAddress = AppLogger.Sanitize(record.OriginalAddress);
+                    record.ProposedAddress = AppLogger.Sanitize(record.ProposedAddress);
+                    record.OriginalPrefixLength = AppLogger.Sanitize(record.OriginalPrefixLength);
+                    record.OriginalDhcp = AppLogger.Sanitize(record.OriginalDhcp);
+                    record.OriginalGateway = AppLogger.Sanitize(record.OriginalGateway);
+                    record.Notes = AppLogger.Sanitize(record.Notes);
+                    record.Outcome = IpChangeOutcomes.Normalize(record.Outcome);
+                    normalized.Add(record);
+                }
+            }
+            if (normalized.Count > 50)
+            {
+                normalized.RemoveRange(0, normalized.Count - 50);
             }
             return normalized;
         }

@@ -144,6 +144,7 @@ namespace MacRando
         private readonly Label _headerPublicIpLabel;
         private readonly Label _adapterCountLabel;
         private readonly Label _listHintLabel;
+        private Label _licenseLabel;
         private readonly Label _selectedTitleLabel;
         private readonly Label _selectedStatusLabel;
         private readonly Label _currentMacLabel;
@@ -741,11 +742,12 @@ namespace MacRando
 
         private void BuildListPane()
         {
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(18, 18, 14, 14) };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(18, 18, 14, 14) };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Label title = MakeMutedLabel("PHYSICAL ADAPTERS");
             title.AutoSize = false;
             title.Dock = DockStyle.Fill;
@@ -756,6 +758,12 @@ namespace MacRando
             _listHintLabel.Dock = DockStyle.Fill;
             _listHintLabel.TextAlign = ContentAlignment.MiddleLeft;
             layout.Controls.Add(_listHintLabel, 0, 2);
+            _licenseLabel = MakeMutedLabel(LicenseInfo.Notice);
+            _licenseLabel.Dock = DockStyle.Fill;
+            _licenseLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _licenseLabel.Font = new Font("Segoe UI", 8F, FontStyle.Regular, GraphicsUnit.Point);
+            _toolTip.SetToolTip(_licenseLabel, "Open the tray menu and choose License to read the full " + LicenseInfo.Name + ".");
+            layout.Controls.Add(_licenseLabel, 0, 3);
             _listPanel.Controls.Add(layout);
         }
 
@@ -1174,6 +1182,7 @@ namespace MacRando
             _listPanel.BackColor = dark ? Color.FromArgb(15, 23, 42) : Color.FromArgb(248, 250, 252);
             _titleLabel.ForeColor = text;
             _subtitleLabel.ForeColor = secondary;
+            _licenseLabel.ForeColor = secondary;
             _headerPublicIpLabel.ForeColor = secondary;
             _currentMacLabel.ForeColor = accent;
             _publicIpLabel.ForeColor = accent;

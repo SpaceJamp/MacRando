@@ -176,6 +176,9 @@ namespace MacRando
             ToolStripMenuItem about = new ToolStripMenuItem("About MacRando");
             about.Click += (sender, args) => ShowAbout();
 
+            ToolStripMenuItem license = new ToolStripMenuItem("License (" + LicenseInfo.SpdxId + ")");
+            license.Click += (sender, args) => ShowLicense();
+
             _exitMenuItem.Click += async (sender, args) => await ExitApplicationAsync();
 
             _menu.Items.Add(open);
@@ -200,6 +203,7 @@ namespace MacRando
             _menu.Items.Add(_startWithWindowsMenuItem);
             _menu.Items.Add(_autoRandomizeMenuItem);
             _menu.Items.Add(about);
+            _menu.Items.Add(license);
             _menu.Items.Add(_exitMenuItem);
         }
 
@@ -518,7 +522,7 @@ namespace MacRando
             ShowReadOnlyReport("MacRando read-only diagnostics", text);
         }
 
-        private void ShowReadOnlyReport(string title, string text)
+        private void ShowReadOnlyReport(string title, string text, string copyButtonText = "Copy report")
         {
             using (var dialog = new Form())
             {
@@ -540,7 +544,7 @@ namespace MacRando
                 };
                 var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
                 var close = new Button { Text = "Close", AutoSize = true, DialogResult = DialogResult.OK };
-                var copy = new Button { Text = "Copy report", AutoSize = true };
+                var copy = new Button { Text = copyButtonText, AutoSize = true };
                 copy.Click += (sender, args) =>
                 {
                     try
@@ -2060,10 +2064,17 @@ namespace MacRando
                 AppInfo.ProductName + " " + AppInfo.DisplayVersion + "\n\n" +
                 "TMAC-inspired adapter changer with random/manual MAC addresses, restore, local IP tools, and VPN support.\n\n" +
                 "A local address is not your public Internet address. Use a Windows VPN profile to change the public address.\n\n" +
+                LicenseInfo.Notice + "\n" +
+                "See the License item in this tray menu for the full license text.\n\n" +
                 "Restore profiles are encrypted for the current Windows user and stored under:\n" + _stateStore.StatePath,
                 "About MacRando",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
+        }
+
+        private void ShowLicense()
+        {
+            ShowReadOnlyReport("MacRando license - " + LicenseInfo.SpdxId, LicenseInfo.GetDisplayText(), "Copy license");
         }
 
         private async Task ExitApplicationAsync()

@@ -143,7 +143,7 @@ namespace MacRando
     internal static class AppInfo
     {
         public const string ProductName = "MacRando";
-        public const string Version = "1.2.0";
+        public const string Version = "1.3.0";
         public const string BuildLabel = "2026.09";
         public static string DisplayVersion { get { return Version + " (" + BuildLabel + ")"; } }
     }
@@ -164,6 +164,67 @@ namespace MacRando
         }
     }
 
+    internal static class RetryKinds
+    {
+        public const string None = "";
+        public const string Mac = "Mac";
+        public const string Ip = "Ip";
+        public const string MacAndIp = "MacAndIp";
+
+        public static string Normalize(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return None;
+            }
+            string normalized = value.Trim();
+            if (string.Equals(normalized, Mac, StringComparison.OrdinalIgnoreCase))
+            {
+                return Mac;
+            }
+            if (string.Equals(normalized, Ip, StringComparison.OrdinalIgnoreCase))
+            {
+                return Ip;
+            }
+            if (string.Equals(normalized, MacAndIp, StringComparison.OrdinalIgnoreCase))
+            {
+                return MacAndIp;
+            }
+            return None;
+        }
+
+        public static string FromFlags(bool changeMac, bool changeIp)
+        {
+            if (changeMac && changeIp)
+            {
+                return MacAndIp;
+            }
+            if (changeMac)
+            {
+                return Mac;
+            }
+            if (changeIp)
+            {
+                return Ip;
+            }
+            return None;
+        }
+
+        public static bool IncludesMac(string value)
+        {
+            string kind = Normalize(value);
+            return string.Equals(kind, Mac, StringComparison.Ordinal) ||
+                string.Equals(kind, MacAndIp, StringComparison.Ordinal);
+        }
+
+        public static bool IncludesIp(string value)
+        {
+            string kind = Normalize(value);
+            return string.Equals(kind, Ip, StringComparison.Ordinal) ||
+                string.Equals(kind, MacAndIp, StringComparison.Ordinal);
+        }
+    }
+
     internal sealed class PendingOperation
     {
         public string OperationId { get; set; }
@@ -171,6 +232,51 @@ namespace MacRando
         public string Action { get; set; }
         public bool Automatic { get; set; }
         public DateTime StartedAtUtc { get; set; }
+
+        // Structured retry metadata. Older state files only have Action, so callers
+        // must fall back to parsing it when Kind is missing.
+        public string Kind { get; set; }
+        public bool GenerateRandomMac { get; set; }
+        public string RequestedMac { get; set; }
+    }
+
+    internal sealed class IpChangeRecord
+    {
+        public string RecordId { get; set; }
+        public DateTime TimestampUtc { get; set; }
+        public string AdapterKey { get; set; }
+        public string AdapterName { get; set; }
+        public string OriginalAddress { get; set; }
+        public string ProposedAddress { get; set; }
+        public string OriginalPrefixLength { get; set; }
+        public string OriginalDhcp { get; set; }
+        public string OriginalGateway { get; set; }
+        public string Outcome { get; set; }
+        public bool Automatic { get; set; }
+        public string Notes { get; set; }
+    }
+
+    internal static class IpChangeOutcomes
+    {
+        public const string Applied = "Applied";
+        public const string Verified = "Verified";
+        public const string RolledBack = "RolledBack";
+        public const string RestoreFailed = "RestoreFailed";
+        public const string Failed = "Failed";
+
+        public static string Normalize(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return Failed;
+            }
+            string normalized = value.Trim();
+            if (string.Equals(normalized, Applied, StringComparison.OrdinalIgnoreCase)) return Applied;
+            if (string.Equals(normalized, Verified, StringComparison.OrdinalIgnoreCase)) return Verified;
+            if (string.Equals(normalized, RolledBack, StringComparison.OrdinalIgnoreCase)) return RolledBack;
+            if (string.Equals(normalized, RestoreFailed, StringComparison.OrdinalIgnoreCase)) return RestoreFailed;
+            return Failed;
+        }
     }
 
     internal sealed class OperationHistoryEntry
@@ -237,6 +343,42 @@ namespace MacRando
         public bool CanRestore { get; set; }
         public bool CanRetry { get; set; }
         public bool Acknowledged { get; set; }
+
+        // Structured retry metadata, replacing the need to parse the display Action text.
+        // Empty Kind means the entry predates this field and cannot be retried reliably.
+        public string RetryKind { get; set; }
+        public bool RetryGenerateRandomMac { get; set; }
+        public string RetryRequestedMac { get; set; }
+
+        public bool HasStructuredRetry
+        {
+            get
+            {
+                return !string.Equals(RetryKinds.Normalize(RetryKind), RetryKinds.None, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    internal sealed class PreflightChangeItem
+    {
+        public string Setting { get; set; }
+        public string Current { get; set; }
+        public string Planned { get; set; }
+        public bool Changes { get; set; }
+        public string Note { get; set; }
+
+        public string ToDisplayLine()
+        {
+            string marker = Changes ? "CHANGE" : "keep  ";
+            string line = "  [" + marker + "] " + (Setting ?? "?") +
+                ": " + (string.IsNullOrWhiteSpace(Current) ? "(none)" : Current) +
+                "  ->  " + (string.IsNullOrWhiteSpace(Planned) ? "(none)" : Planned);
+            if (!string.IsNullOrWhiteSpace(Note))
+            {
+                line += "  (" + Note + ")";
+            }
+            return line;
+        }
     }
 
     internal sealed class UpdateManifest
@@ -267,6 +409,7 @@ namespace MacRando
         public PendingOperation PendingOperation { get; set; }
         public List<OperationHistoryEntry> History { get; set; }
         public List<NotificationHistoryEntry> Notifications { get; set; }
+        public List<IpChangeRecord> IpChangeHistory { get; set; }
 
         public AppState()
         {
@@ -275,6 +418,7 @@ namespace MacRando
             Presets = new Dictionary<string, AdapterPreset>(StringComparer.OrdinalIgnoreCase);
             History = new List<OperationHistoryEntry>();
             Notifications = new List<NotificationHistoryEntry>();
+            IpChangeHistory = new List<IpChangeRecord>();
         }
     }
 }
