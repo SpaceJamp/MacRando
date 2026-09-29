@@ -1,5 +1,42 @@
 # MacRando Changelog
 
+## 1.4.0 - 2026.09
+
+### Added
+
+- **A real updater.** A verified update can now be installed and restarted in place from the update report, or straight from the tray with **Install update and restart**. Previously the app only downloaded and verified the file and left the replacement to the user.
+- The installer runs as a short-lived helper process, because a running executable cannot overwrite its own image. The helper waits for MacRando to exit, keeps a backup of the current build, swaps in the verified download, and starts the new build.
+- **Automatic rollback.** The new build writes a startup marker once it has genuinely started. If the marker never appears, the helper stops the unresponsive process, restores the previous build, and relaunches it, so a user is never left with an executable that will not start.
+- A helper log at `%LOCALAPPDATA%\MacRando\update-install.log` records every step, and the previous build is kept at `%LOCALAPPDATA%\MacRando\MacRando.previous.exe`.
+
+### Safety rules enforced before anything is replaced
+
+An install is refused, with the reason shown in the report, when:
+
+- the download was not verified by both SHA-256 and the Authenticode signer;
+- the verified download is no longer on disk;
+- an adapter restore profile is still pending, since installing closes MacRando;
+- an adapter, restore, or VPN operation is running;
+- the manifest version is not newer than the installed version;
+- no update manifest URL is configured.
+
+Paths are passed to the helper through environment variables rather than a command line, so nothing has to be quoted or can be tampered with in transit. The helper inherits elevation from MacRando, so it can replace an executable installed under Program Files.
+
+### Fixed
+
+- The generated helper script was invalid PowerShell and would have failed on first use. `$` had been escaped with PowerShell backticks inside a C# verbatim string, where a backtick is a literal character, so every variable reference was emitted escaped. The script is now validated by the PowerShell parser.
+
+### Tests
+
+- Eleven assertions covering the install guard, including the safety-critical cases: refused while a restore profile is pending, refused while busy, refused for a downgrade or the same version, refused when unverified or missing, and allowed only for a verified newer build.
+- An end-to-end test that extracts the real generated helper script, checks that it parses, and runs it against a stub executable for both outcomes: a healthy build is installed, and a build that never reports a successful start is rolled back.
+
+### Deliberate limitation
+
+Rollback triggers on a build that fails to *start*, not on a later crash. A new build that starts and then fails during an adapter refresh is left in place, because rolling back the executable in response to a transient network error would be worse than the problem it solved.
+
+## 1.3.1 - 2026.09
+
 ## 1.3.1 - 2026.09
 
 ### Fixed

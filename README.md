@@ -179,11 +179,33 @@ This is a convenience for testing. Public distribution still needs an OV or EV c
 
 ## Optional update checks
 
-The tray menu includes **Check for updates**. Configure an HTTPS update manifest URL and expected signer thumbprint in **Notification center** first. The manifest must contain `Version`, `DownloadUrl`, `Sha256`, and `SignerThumbprint` fields. MacRando downloads a newer release to a temporary folder, verifies its SHA-256 hash and Authenticode signer, and never replaces the running executable automatically. The latest result is written to:
+The tray menu includes **Check for updates**. Configure an HTTPS update manifest URL and expected signer thumbprint in **Notification center** first. The manifest must contain `Version`, `DownloadUrl`, `Sha256`, and `SignerThumbprint` fields. MacRando downloads a newer release to a temporary folder and verifies its SHA-256 hash and Authenticode signer before it will do anything with it. The latest result is written to:
 
 ```text
 %LOCALAPPDATA%\MacRando\updates-latest.txt
 ```
+
+### Installing an update
+
+When a newer build has been downloaded and verified, the update report offers **Install and restart**, and the tray has an **Install update and restart** shortcut that checks and installs in one step.
+
+A running executable cannot overwrite its own image, so MacRando hands the work to a short-lived helper process that:
+
+1. waits for MacRando to exit,
+2. copies the current build to `%LOCALAPPDATA%\MacRando\MacRando.previous.exe`,
+3. copies the verified download over the executable,
+4. starts the new build, and
+5. watches for a startup marker the new build writes once it has genuinely started.
+
+If the marker never appears, the helper stops the unresponsive process, restores the previous build, and launches it again. A failed update therefore leaves you with a working MacRando rather than a broken executable. Every step is recorded in:
+
+```text
+%LOCALAPPDATA%\MacRando\update-install.log
+```
+
+Install is refused, with the reason shown in the report, when the download is not fully verified, when a restore profile is still pending, when an adapter, restore, or VPN operation is running, or when the manifest version is not newer than the installed version.
+
+Rollback covers a build that fails to *start*. A build that starts and later fails during an adapter refresh is left in place, because replacing the executable over a transient network error would cause more harm than it solves.
 
 The manifest for this repository is served from:
 
@@ -282,6 +304,7 @@ Unless required by applicable law or agreed to in writing, the software is provi
 - `src/StateStore.cs` — DPAPI-protected persistent restore profiles, presets, and history.
 - `src/DiagnosticsService.cs` — read-only diagnostics and IP preflight reporting with a planned-change diff.
 - `src/UpdateService.cs` — optional HTTPS manifest update checks with hash/signature verification.
+- `src/UpdateInstaller.cs` — verified install and restart, with a helper process and automatic rollback.
 - `src/AppSettings.cs` — startup, display, notification, and adapter-view preferences.
 - `src/PowerShellRunnerService.cs` — injectable PowerShell runner boundary.
 - `assets/` — supplied multi-size application and tray icons.

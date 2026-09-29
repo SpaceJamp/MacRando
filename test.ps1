@@ -22,6 +22,7 @@ $sources = @(
     (Join-Path $root 'src\StateStore.cs'),
     (Join-Path $root 'src\DiagnosticsService.cs'),
     (Join-Path $root 'src\UpdateService.cs'),
+    (Join-Path $root 'src\UpdateInstaller.cs'),
     (Join-Path $root 'src\LicenseInfo.cs'),
     (Join-Path $root 'src\NotificationPopup.cs'),
     (Join-Path $root 'src\NotificationCenterForm.cs'),

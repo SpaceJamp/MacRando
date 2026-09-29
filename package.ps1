@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '1.3.1',
+    [string]$Version = '1.4.0',
     [string]$SignThumbprint,
     [string]$TimestampServer,
     # Also lay out an unzipped folder that can be copied and run without installing.

@@ -32,6 +32,7 @@ namespace MacRando
         private readonly ToolStripMenuItem _statusMenuItem;
         private ToolStripMenuItem _versionMenuItem;
         private ToolStripMenuItem _restoreAllMenuItem;
+        private ToolStripMenuItem _installUpdateMenuItem;
         private readonly ToolStripMenuItem _refreshMenuItem;
         private readonly ToolStripMenuItem _diagnosticsMenuItem;
         private readonly ToolStripMenuItem _ipPreflightMenuItem;
@@ -95,6 +96,7 @@ namespace MacRando
             _diagnosticsMenuItem = new ToolStripMenuItem("Run read-only diagnostics");
             _ipPreflightMenuItem = new ToolStripMenuItem("Run read-only IP preflight");
             _updateMenuItem = new ToolStripMenuItem("Check for updates");
+            _installUpdateMenuItem = new ToolStripMenuItem("Install update and restart");
             _notificationCenterMenuItem = new ToolStripMenuItem("Notification center");
             _startMinimizedMenuItem = new ToolStripMenuItem("Start minimized to tray") { Checked = _settings.StartMinimized };
             _startWithWindowsMenuItem = new ToolStripMenuItem("Start with Windows") { Checked = _settings.StartWithWindows };
@@ -124,6 +126,7 @@ namespace MacRando
             // Wait until Application.Run has installed the WinForms synchronization context
             // before refreshing controls from asynchronous PowerShell operations.
             AppLogger.Info("MacRando " + AppInfo.DisplayVersion + " started.");
+            UpdateInstaller.MarkStartupSuccess(AppInfo.Version);
             Application.Idle += StartInitialRefresh;
         }
 
@@ -164,6 +167,7 @@ namespace MacRando
             _diagnosticsMenuItem.Click += async (sender, args) => await RunDiagnosticsAsync();
             _ipPreflightMenuItem.Click += async (sender, args) => await RunIpPreflightAsync();
             _updateMenuItem.Click += async (sender, args) => await CheckForUpdatesAsync();
+            _installUpdateMenuItem.Click += async (sender, args) => await InstallPendingUpdateAsync();
             _notificationCenterMenuItem.Click += (sender, args) => ShowNotificationCenter();
             _startMinimizedMenuItem.Click += (sender, args) => ToggleStartMinimized();
             _startWithWindowsMenuItem.Click += (sender, args) => ToggleStartWithWindows();
@@ -206,6 +210,7 @@ namespace MacRando
             _menu.Items.Add(_diagnosticsMenuItem);
             _menu.Items.Add(_ipPreflightMenuItem);
             _menu.Items.Add(_updateMenuItem);
+            _menu.Items.Add(_installUpdateMenuItem);
             _menu.Items.Add(_notificationCenterMenuItem);
             _menu.Items.Add(stateFolder);
             _menu.Items.Add(logsFolder);
@@ -490,14 +495,32 @@ namespace MacRando
                 if (result.IsVerified)
                 {
                     lines.Add("Verified download: " + result.LocalDownloadPath);
-                    lines.Add("The file was verified but was not installed automatically.");
+                    lines.Add("SHA-256 and the Authenticode signer both matched the manifest.");
                 }
                 if (result.RequiresConfiguration)
                 {
                     lines.Add("Configure an HTTPS update manifest URL in Notification center > Apply preferences.");
                 }
-                lines.Add("No files were replaced by this update check.");
+
+                int pending = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
+                string installBlockReason;
+                bool canInstall = UpdateInstaller.CanInstall(
+                    result, pending, _busy, AppInfo.Version, out installBlockReason);
+
+                lines.Add("");
+                if (canInstall)
+                {
+                    lines.Add("Installing will close MacRando, replace " + Application.ExecutablePath + ",");
+                    lines.Add("and restart it. The previous build is kept and is restored automatically");
+                    lines.Add("if the new build does not start successfully.");
+                }
+                else
+                {
+                    lines.Add("Automatic install is not available: " + installBlockReason);
+                }
+
                 string text = string.Join(Environment.NewLine, lines.ToArray());
+                UpdateInstaller.PendingInstall = result;
                 try
                 {
                     File.WriteAllText(
@@ -508,7 +531,17 @@ namespace MacRando
                 catch
                 {
                 }
-                ShowReadOnlyReport("MacRando update check", text);
+                // The click handler is synchronous, so the async install is started and
+                // left to run; it manages its own busy state and error reporting.
+                Action installAction = canInstall
+                    ? (Action)(() => { Task installTask = InstallVerifiedUpdateAsync(result); })
+                    : null;
+                ShowReadOnlyReport(
+                    "MacRando update check",
+                    text,
+                    "Copy report",
+                    canInstall ? "Install and restart" : null,
+                    installAction);
                 _form.SetStatus("Update check completed.");
             }
             catch (Exception error)
@@ -519,6 +552,115 @@ namespace MacRando
             finally
             {
                 SetBusy(false);
+            }
+        }
+
+        /// <summary>
+        /// Tray shortcut: re-check and install in one step, for when the user does not want to
+        /// read the report dialog first.
+        /// </summary>
+        private async Task InstallPendingUpdateAsync()
+        {
+            if (_busy || _confirmationOpen)
+            {
+                return;
+            }
+
+            SetBusy(true);
+            _form.SetStatus("Checking for a verified update to install...");
+            try
+            {
+                UpdateCheckResult result = await _updateService.CheckAsync(
+                    _settings.UpdateManifestUrl,
+                    _settings.ExpectedSignerThumbprint);
+
+                int pending = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
+                string reason;
+                if (!UpdateInstaller.CanInstall(result, pending, _busy, AppInfo.Version, out reason))
+                {
+                    _form.SetStatus(reason);
+                    ShowNotification("No update to install", reason, ToolTipIcon.Info);
+                    return;
+                }
+
+                UpdateInstaller.PendingInstall = result;
+                SetBusy(false);
+                await InstallVerifiedUpdateAsync(result);
+            }
+            catch (Exception error)
+            {
+                AppLogger.Error("Update check before install failed.", error);
+                SetBusy(false);
+                ShowError(error);
+            }
+        }
+
+        private async Task InstallVerifiedUpdateAsync(UpdateCheckResult result)
+        {
+            if (_busy || _confirmationOpen)
+            {
+                return;
+            }
+
+            int pending = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
+            string reason;
+            if (!UpdateInstaller.CanInstall(result, pending, _busy, AppInfo.Version, out reason))
+            {
+                ShowError(new InvalidOperationException(reason));
+                return;
+            }
+
+            _confirmationOpen = true;
+            DialogResult answer;
+            try
+            {
+                answer = MessageBox.Show(
+                    _form,
+                    "Install MacRando " + result.Manifest.Version + " and restart?\n\n" +
+                    "The download was already verified by SHA-256 and Authenticode signer.\n\n" +
+                    "MacRando will close, replace " + Application.ExecutablePath + ", and start again.\n" +
+                    "The current build is kept as a backup and is restored automatically if the\n" +
+                    "new build does not start successfully.\n\n" +
+                    (pending > 0 ? "Warning: " + pending + " adapter restore profile(s) are still pending.\n" : string.Empty),
+                    "Install update",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2);
+            }
+            finally
+            {
+                _confirmationOpen = false;
+            }
+
+            if (answer != DialogResult.Yes)
+            {
+                return;
+            }
+
+            SetBusy(true);
+            try
+            {
+                UpdateInstaller.PendingInstall = result;
+                UpdateInstaller.LaunchInstallAndRestart(
+                    result.Manifest.Version,
+                    40,
+                    300);
+                _form.SetStatus("Installing the update and restarting...");
+                ShowNotification(
+                    "Installing update",
+                    "MacRando is closing to install " + result.Manifest.Version + ". The new build will start automatically.",
+                    ToolTipIcon.Info);
+
+                // Give the notification a moment to be seen, then shut down. A pending
+                // restore is impossible here because CanInstall refuses that case.
+                await Task.Delay(700);
+                Application.Exit();
+            }
+            catch (Exception error)
+            {
+                AppLogger.Error("Update install failed to start.", error);
+                SetBusy(false);
+                ShowError(error);
             }
         }
 
@@ -566,7 +708,7 @@ namespace MacRando
             ShowReadOnlyReport("MacRando read-only diagnostics", text);
         }
 
-        private void ShowReadOnlyReport(string title, string text, string copyButtonText = "Copy report")
+        private void ShowReadOnlyReport(string title, string text, string copyButtonText = "Copy report", string actionText = null, Action action = null)
         {
             using (var dialog = new Form())
             {
@@ -602,6 +744,21 @@ namespace MacRando
                     }
                 };
                 buttons.Controls.Add(close);
+                if (!string.IsNullOrWhiteSpace(actionText) && action != null)
+                {
+                    var actionButton = new Button { Text = actionText, AutoSize = true, Tag = true };
+                    actionButton.FlatStyle = FlatStyle.Flat;
+                    actionButton.UseVisualStyleBackColor = false;
+                    actionButton.BackColor = Color.FromArgb(37, 99, 235);
+                    actionButton.ForeColor = Color.White;
+                    actionButton.Click += (sender, args) =>
+                    {
+                        dialog.DialogResult = DialogResult.OK;
+                        dialog.Close();
+                        action();
+                    };
+                    buttons.Controls.Add(actionButton);
+                }
                 buttons.Controls.Add(copy);
                 layout.Controls.Add(output, 0, 0);
                 layout.Controls.Add(buttons, 0, 1);
@@ -2121,6 +2278,18 @@ namespace MacRando
                 _restoreAllMenuItem.Text = pendingCount > 0
                     ? "Restore all pending profiles (" + pendingCount + ")"
                     : "Restore all pending profiles";
+            }
+            if (_installUpdateMenuItem != null)
+            {
+                UpdateCheckResult pendingInstall = UpdateInstaller.PendingInstall;
+                string installReason;
+                _installUpdateMenuItem.Enabled = !interactionBusy &&
+                    UpdateInstaller.CanInstall(
+                        pendingInstall,
+                        _state == null || _state.Backups == null ? 0 : _state.Backups.Count,
+                        false,
+                        AppInfo.Version,
+                        out installReason);
             }
             int unreadNotifications = 0;
             if (_state.Notifications != null)

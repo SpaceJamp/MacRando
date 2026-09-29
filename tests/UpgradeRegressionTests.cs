@@ -6,6 +6,8 @@ using System.Text;
 using System.Web.Script.Serialization;
 using IpChangeOutcomes = MacRando.IpChangeOutcomes;
 using RetryKinds = MacRando.RetryKinds;
+using UpdateCheckResult = MacRando.UpdateCheckResult;
+using UpdateManifest = MacRando.UpdateManifest;
 
 /// <summary>
 /// Upgrade regression coverage for 1.3.0.
@@ -32,6 +34,8 @@ internal static class UpgradeRegressionChecks
             StateRoundTripKeepsNewCollections();
             OlderStateFileStillLoads();
             PreflightChangeLines();
+            InstallGuardRefusesUnsafeCases();
+            InstallGuardAllowsVerifiedNewerBuild();
             Console.WriteLine("upgrade-regression-tests=OK;checks=" + _checks);
             return 0;
         }
@@ -228,6 +232,128 @@ internal static class UpgradeRegressionChecks
         var kept = new MacRando.PreflightChangeItem { Setting = "Default routes", Current = "Existing", Planned = "Unchanged" };
         Check(kept.ToDisplayLine().Contains("keep"), "an unchanged item should be marked as kept");
         Check(!kept.ToDisplayLine().Contains("CHANGE"), "an unchanged item should not be marked CHANGE");
+    }
+
+    private static void InstallGuardRefusesUnsafeCases()
+    {
+        string verifiedFile = Path.Combine(Path.GetTempPath(), "MacRandoInstallTest-" + Guid.NewGuid().ToString("N") + ".exe");
+        File.WriteAllBytes(verifiedFile, new byte[] { 77, 90, 90, 0, 0, 0 });
+        try
+        {
+            UpdateCheckResult verified = new UpdateCheckResult
+            {
+                IsVerified = true,
+                IsUpdateAvailable = true,
+                LocalDownloadPath = verifiedFile,
+                StatusMessage = "downloaded",
+                Manifest = new UpdateManifest
+                {
+                    Version = "9.9.9",
+                    DownloadUrl = "https://example.invalid/MacRando-9.9.9.exe",
+                    Sha256 = new string('A', 64),
+                    SignerThumbprint = new string('B', 40)
+                }
+            };
+
+            string reason;
+            // The safety-critical case: never install while an adapter restore is pending,
+            // because installing closes the app and the profile must be resolved first.
+            Check(!MacRando.UpdateInstaller.CanInstall(verified, 1, false, "1.0.0", out reason),
+                "install must be refused while a restore profile is pending");
+            Check(reason.IndexOf("Restore", StringComparison.OrdinalIgnoreCase) >= 0,
+                "the refusal should explain that a restore is pending, got: " + reason);
+
+            Check(!MacRando.UpdateInstaller.CanInstall(verified, 0, true, "1.0.0", out reason),
+                "install must be refused while an operation is running");
+
+            // Downgrade and same-version must both be refused.
+            UpdateCheckResult downgrade = CloneAs(verified, "0.9.0");
+            Check(!MacRando.UpdateInstaller.CanInstall(downgrade, 0, false, "1.0.0", out reason),
+                "install must refuse an older version");
+            UpdateCheckResult sameVersion = CloneAs(verified, "1.0.0");
+            Check(!MacRando.UpdateInstaller.CanInstall(sameVersion, 0, false, "1.0.0", out reason),
+                "install must refuse the same version");
+
+            // An unverified or missing download must never be installed.
+            UpdateCheckResult unverified = CloneAs(verified, "9.9.9");
+            unverified.IsVerified = false;
+            Check(!MacRando.UpdateInstaller.CanInstall(unverified, 0, false, "1.0.0", out reason),
+                "install must refuse a download that was not verified");
+
+            UpdateCheckResult missingFile = CloneAs(verified, "9.9.9");
+            missingFile.LocalDownloadPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".exe");
+            Check(!MacRando.UpdateInstaller.CanInstall(missingFile, 0, false, "1.0.0", out reason),
+                "install must refuse when the verified download is gone from disk");
+
+            Check(!MacRando.UpdateInstaller.CanInstall(null, 0, false, "1.0.0", out reason),
+                "install must refuse when no check has run");
+
+            UpdateCheckResult unconfigured = new UpdateCheckResult
+            {
+                RequiresConfiguration = true,
+                StatusMessage = "No update manifest URL is configured."
+            };
+            Check(!MacRando.UpdateInstaller.CanInstall(unconfigured, 0, false, "1.0.0", out reason),
+                "install must refuse when the updater is not configured");
+        }
+        finally
+        {
+            try { File.Delete(verifiedFile); } catch { }
+        }
+    }
+
+    private static void InstallGuardAllowsVerifiedNewerBuild()
+    {
+        string verifiedFile = Path.Combine(Path.GetTempPath(), "MacRandoInstallTest-" + Guid.NewGuid().ToString("N") + ".exe");
+        File.WriteAllBytes(verifiedFile, new byte[] { 77, 90, 90, 0, 0, 0 });
+        try
+        {
+            UpdateCheckResult verified = new UpdateCheckResult
+            {
+                IsVerified = true,
+                IsUpdateAvailable = true,
+                LocalDownloadPath = verifiedFile,
+                StatusMessage = "downloaded and verified",
+                Manifest = new UpdateManifest
+                {
+                    Version = "2.0.1",
+                    DownloadUrl = "https://example.invalid/MacRando-2.0.1.exe",
+                    Sha256 = new string('A', 64),
+                    SignerThumbprint = new string('B', 40)
+                }
+            };
+            string reason;
+            Check(MacRando.UpdateInstaller.CanInstall(verified, 0, false, "2.0.0", out reason),
+                "a verified newer build with no pending restore should be installable, got: " + reason);
+            Check(string.IsNullOrEmpty(reason), "an allowed install should not report a refusal reason");
+        }
+        finally
+        {
+            try { File.Delete(verifiedFile); } catch { }
+        }
+    }
+
+    private static UpdateCheckResult CloneAs(UpdateCheckResult source, string version)
+    {
+        return new UpdateCheckResult
+        {
+            IsVerified = source.IsVerified,
+            IsUpdateAvailable = source.IsUpdateAvailable,
+            RequiresConfiguration = source.RequiresConfiguration,
+            StatusMessage = source.StatusMessage,
+            LocalDownloadPath = source.LocalDownloadPath,
+            Manifest = source.Manifest == null
+                ? null
+                : new UpdateManifest
+                {
+                    Version = version,
+                    DownloadUrl = source.Manifest.DownloadUrl,
+                    Sha256 = source.Manifest.Sha256,
+                    SignerThumbprint = source.Manifest.SignerThumbprint,
+                    ReleaseNotesUrl = source.Manifest.ReleaseNotesUrl,
+                    PublishedUtc = source.Manifest.PublishedUtc
+                }
+        };
     }
 
     // The normalization helpers are private, so reach them the same way the store does.
