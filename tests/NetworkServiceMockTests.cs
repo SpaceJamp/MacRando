@@ -238,6 +238,11 @@ internal static class NetworkServiceMockTests
             {
                 return accessibilityResult;
             }
+            int layoutResult = LayoutTests.Run();
+            if (layoutResult != 0)
+            {
+                return layoutResult;
+            }
             return 0;
         }
         catch (Exception error)
