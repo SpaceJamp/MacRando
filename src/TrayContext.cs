@@ -4,9 +4,11 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Media;
+using System.Net.NetworkInformation;
 using System.Security.Principal;
 using Microsoft.Win32;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -57,6 +59,15 @@ namespace MacRando
         private NotificationCenterForm _notificationCenterForm;
         private readonly HashSet<string> _changedAdapterKeysThisSession = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<NotificationPopup> _notificationPopups = new List<NotificationPopup>();
+        private readonly Dictionary<string, DateTime> _networkAutoApplyLog =
+            new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        private readonly object _networkGate = new object();
+        private readonly System.Windows.Forms.Timer _networkDebounce = new System.Windows.Forms.Timer();
+        private SynchronizationContext _uiContext;
+        private bool _networkSettlePending;
+        private bool _networkBaselineSet;
+        private string _lastNetworkKey = string.Empty;
+        private int _networkAutoApplyInFlight;
 
         public TrayContext()
             : this(false)
@@ -142,6 +153,7 @@ namespace MacRando
             if (disposing)
             {
                 Application.Idle -= StartInitialRefresh;
+                StopNetworkChangeWatch();
                 List<NotificationPopup> popups = new List<NotificationPopup>(_notificationPopups);
                 _notificationPopups.Clear();
                 foreach (NotificationPopup popup in popups)
@@ -276,7 +288,7 @@ namespace MacRando
                 await VpnActionAsync(_form.SelectedVpn, false);
             _form.DisconnectVpnRequested += async (sender, args) =>
                 await VpnActionAsync(_form.SelectedVpn, true);
-            _form.SavePresetRequested += (sender, args) => SavePreset();
+            _form.SavePresetRequested += async (sender, args) => await SavePresetAsync();
             _form.ApplyPresetRequested += async (sender, args) => await ApplyPresetAsync();
             _form.StartupRandomizeToggleRequested += (sender, args) => ToggleStartupRandomization();
             _form.NotificationCenterRequested += (sender, args) => ShowNotificationCenter();
@@ -301,7 +313,254 @@ namespace MacRando
             {
                 AppLogger.Info("Starting in the notification area; no network-changing action will run.");
             }
+            StartNetworkChangeWatch();
             InitialRefresh();
+        }
+
+        private void StartNetworkChangeWatch()
+        {
+            // The network events arrive on a thread-pool thread, so the work is marshalled
+            // back to the UI thread and then debounced. Windows raises these repeatedly
+            // while a connection is still settling, and acting on each one in turn would
+            // churn the adapter.
+            _uiContext = SynchronizationContext.Current;
+            _networkDebounce.Interval = 4000;
+            _networkDebounce.Tick += OnNetworkDebounceTick;
+            NetworkChange.NetworkAddressChanged += OnSystemNetworkChanged;
+            NetworkChange.NetworkAvailabilityChanged += OnSystemNetworkChanged;
+            AppLogger.Info("Watching for network changes; automatic apply is " +
+                (HasAnyNetworkBoundPreset() ? "available for bound presets" : "not configured for any preset") + ".");
+        }
+
+        private bool HasAnyNetworkBoundPreset()
+        {
+            if (_state == null || _state.Presets == null)
+            {
+                return false;
+            }
+            foreach (AdapterPreset preset in _state.Presets.Values)
+            {
+                if (preset != null && preset.IsNetworkBound && preset.AutoApplyOnNetworkChange)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void StopNetworkChangeWatch()
+        {
+            NetworkChange.NetworkAddressChanged -= OnSystemNetworkChanged;
+            NetworkChange.NetworkAvailabilityChanged -= OnSystemNetworkChanged;
+            _networkDebounce.Tick -= OnNetworkDebounceTick;
+            _networkDebounce.Stop();
+        }
+
+        private void OnSystemNetworkChanged(object sender, EventArgs e)
+        {
+            lock (_networkGate)
+            {
+                _networkSettlePending = true;
+            }
+            SynchronizationContext context = _uiContext;
+            if (context != null)
+            {
+                context.Post(delegate(object state) { BeginNetworkSettle(); }, null);
+            }
+        }
+
+        private void BeginNetworkSettle()
+        {
+            lock (_networkGate)
+            {
+                if (!_networkSettlePending)
+                {
+                    return;
+                }
+                _networkSettlePending = false;
+            }
+            _networkDebounce.Stop();
+            _networkDebounce.Start();
+        }
+
+        private async void OnNetworkDebounceTick(object sender, EventArgs e)
+        {
+            _networkDebounce.Stop();
+            if (_busy || _confirmationOpen)
+            {
+                return;
+            }
+            if (Interlocked.CompareExchange(ref _networkAutoApplyInFlight, 1, 0) != 0)
+            {
+                return;
+            }
+            try
+            {
+                await EvaluateNetworkAutoApplyAsync();
+            }
+            catch (Exception error)
+            {
+                AppLogger.Error("Network-change evaluation failed.", error);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _networkAutoApplyInFlight, 0);
+            }
+        }
+
+        /// <summary>
+        /// Records the network MacRando is sitting on at startup, without acting on it. Without
+        /// a baseline the first network change after launch would look like an arrival, so a
+        /// bound preset would fire on the network the user was already using.
+        /// </summary>
+        private async Task PrimeNetworkBaselineAsync()
+        {
+            try
+            {
+                NetworkIdentity identity = await _network.GetNetworkIdentityAsync();
+                _lastNetworkKey = identity != null && identity.IsUsable ? identity.Key : string.Empty;
+                _networkBaselineSet = true;
+                AppLogger.Info("Network baseline recorded: " +
+                    (string.IsNullOrEmpty(_lastNetworkKey) ? "no network identified" : identity.Description) + ".");
+            }
+            catch (Exception error)
+            {
+                AppLogger.Error("Could not record the network baseline.", error);
+                _networkBaselineSet = true;
+            }
+        }
+
+        private async Task EvaluateNetworkAutoApplyAsync()
+        {
+            NetworkIdentity identity = await _network.GetNetworkIdentityAsync();
+            if (identity == null || !identity.IsUsable)
+            {
+                // Disconnected or unidentified. Clear the baseline so that reconnecting to a
+                // bound network is treated as an arrival rather than as "no change".
+                _lastNetworkKey = string.Empty;
+                return;
+            }
+            if (!_networkBaselineSet)
+            {
+                _lastNetworkKey = identity.Key;
+                _networkBaselineSet = true;
+                return;
+            }
+
+            string previousKey = _lastNetworkKey;
+            _lastNetworkKey = identity.Key;
+            if (string.Equals(previousKey, identity.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                AppLogger.Info("Network re-identified as " + identity.Description + "; no change.");
+                return;
+            }
+
+            int pending = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
+            string reason;
+            AdapterPreset preset = NetworkAutoApply.Select(
+                _state,
+                identity.Key,
+                pending,
+                _restoreStateUnreadable,
+                DateTime.UtcNow,
+                _networkAutoApplyLog,
+                NetworkAutoApply.DefaultCooldownMinutes,
+                out reason);
+            AppLogger.Info("Network changed to " + identity.Description + " (from " +
+                (string.IsNullOrEmpty(previousKey) ? "no network" : previousKey) + "). Automatic apply: " + reason + ".");
+
+            if (preset == null)
+            {
+                return;
+            }
+            await ApplyBoundPresetAsync(preset, identity);
+        }
+
+        private async Task ApplyBoundPresetAsync(AdapterPreset preset, NetworkIdentity identity)
+        {
+            string adapterKey = preset.AdapterKey;
+            AdapterInfo target = null;
+            foreach (AdapterInfo adapter in _adapters)
+            {
+                if (string.Equals(adapter.Key, adapterKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    target = adapter;
+                    break;
+                }
+            }
+            if (target == null)
+            {
+                SkipBoundPreset(preset, "its adapter is not available on this machine");
+                return;
+            }
+            if (FindBackup(target.Key) != null)
+            {
+                SkipBoundPreset(preset, "a restore profile is already pending for that adapter");
+                return;
+            }
+
+            bool changeMac = preset.RandomizeMac;
+            bool changeIp = preset.RandomizeIp;
+            if (changeMac && !target.MacPropertySupported)
+            {
+                changeMac = false;
+                AppLogger.Warning("Bound preset skipped MAC randomization: NetworkAddress is unavailable on " +
+                    AppLogger.MaskMac(target.MacAddress) + ".");
+            }
+            if (changeIp && target.DhcpEnabled)
+            {
+                // Consent to DHCP IP randomization is per operation and is never stored, so
+                // there is nothing to inherit here. A bound preset must not be the thing that
+                // quietly enables it.
+                changeIp = false;
+                AppLogger.Warning("Bound preset skipped IP randomization: " +
+                    AppLogger.MaskMac(target.MacAddress) + " uses DHCP and consent is per operation.");
+            }
+            if (!changeMac && !changeIp)
+            {
+                SkipBoundPreset(preset, "none of its actions are currently possible on that adapter");
+                return;
+            }
+
+            // Logged before the attempt so a failure cannot turn into a tight retry loop.
+            _networkAutoApplyLog[preset.PresetKey ?? preset.Name] = DateTime.UtcNow;
+
+            string action = changeMac && changeIp
+                ? "randomize the MAC and local IPv4 address"
+                : (changeMac ? "randomize the MAC address" : "randomize the local IPv4 address");
+            RecordNotification(
+                "Automatic network preset",
+                "Applied preset \"" + (preset.Name ?? preset.PresetKey) + "\" because this is " +
+                    identity.Description + ": " + action + " on " + target.Name + ".",
+                NotificationKinds.Success,
+                target.Key,
+                "Open dashboard",
+                false,
+                false,
+                null);
+            ShowNotification(
+                "Automatic network preset applied",
+                "Joined " + identity.Description + ", so \"" + (preset.Name ?? preset.PresetKey) +
+                    "\" was applied to " + target.Name + ".",
+                ToolTipIcon.Info);
+
+            await ChangeNetworkAsync(target, changeMac, changeIp, null, true, true);
+        }
+
+        private void SkipBoundPreset(AdapterPreset preset, string why)
+        {
+            string message = "\"" + (preset.Name ?? preset.PresetKey) + "\" was not applied because " + why + ".";
+            AppLogger.Warning("Automatic network preset skipped: " + message);
+            RecordNotification(
+                "Automatic network preset skipped",
+                message,
+                NotificationKinds.Warning,
+                null,
+                "Open dashboard",
+                false,
+                false,
+                null);
+            ShowNotification("Automatic network preset skipped", message, ToolTipIcon.Warning);
         }
 
         private async void InitialRefresh()
@@ -335,6 +594,7 @@ namespace MacRando
 
             if (refreshSucceeded)
             {
+                await PrimeNetworkBaselineAsync();
                 await RunStartupRandomizationIfEnabledAsync();
                 ShowNotification("MacRando is running", "Right-click the tray icon or open the dashboard.", ToolTipIcon.Info);
             }
@@ -1810,6 +2070,45 @@ namespace MacRando
                 }
                 lines.Add("Pending restore profiles: " + (_state == null || _state.Backups == null ? 0 : _state.Backups.Count));
                 lines.Add("Startup randomization enabled: " + (_settings.AutoRandomizeMacOnStartup ? "Yes" : "No"));
+
+                // The network key decides whether a bound preset can match, so a report of
+                // "the preset did not run" is only answerable with it.
+                NetworkIdentity bundleNetwork = null;
+                try
+                {
+                    bundleNetwork = await _network.GetNetworkIdentityAsync();
+                }
+                catch (Exception networkError)
+                {
+                    lines.Add("Current network: could not be identified (" +
+                        AppLogger.Sanitize(networkError.Message) + ")");
+                }
+                if (bundleNetwork != null)
+                {
+                    lines.Add("Current network: " + bundleNetwork.Description +
+                        (bundleNetwork.IsUsable ? "" : " (not identifiable, so no preset can match)"));
+                    lines.Add("Current network key: " + (bundleNetwork.IsUsable ? bundleNetwork.Key : "(none)"));
+                    lines.Add("Last network key seen: " +
+                        (string.IsNullOrEmpty(_lastNetworkKey) ? "(none)" : _lastNetworkKey));
+                }
+                if (_state != null && _state.Presets != null)
+                {
+                    int bound = 0;
+                    int armed = 0;
+                    foreach (AdapterPreset preset in _state.Presets.Values)
+                    {
+                        if (preset == null || !preset.IsNetworkBound)
+                        {
+                            continue;
+                        }
+                        bound++;
+                        if (preset.AutoApplyOnNetworkChange)
+                        {
+                            armed++;
+                        }
+                    }
+                    lines.Add("Network-bound presets: " + bound + " bound, " + armed + " with automatic apply enabled");
+                }
                 lines.Add("Notification history entries: " + (_state == null || _state.Notifications == null ? 0 : _state.Notifications.Count));
                 lines.Add("IP change history entries: " + (_state == null || _state.IpChangeHistory == null ? 0 : _state.IpChangeHistory.Count));
                 lines.Add("");
@@ -2517,15 +2816,33 @@ namespace MacRando
             _form.SetPresets(presets);
         }
 
-        private void SavePreset()
+        private async Task SavePresetAsync()
         {
             AdapterInfo adapter = _form.SelectedAdapter;
             if (adapter == null)
             {
                 return;
             }
+            if (_busy || _confirmationOpen)
+            {
+                return;
+            }
 
-            AdapterPreset edited = ShowPresetEditor("Preset " + (_state.Presets.Count + 1));
+            // Identified up front so the editor can show what would be bound before the user
+            // commits to it, rather than after.
+            SetBusy(true);
+            NetworkIdentity current = null;
+            try
+            {
+                current = await _network.GetNetworkIdentityAsync();
+            }
+            finally
+            {
+                SetBusy(false);
+            }
+            _form.ShowDashboard();
+
+            AdapterPreset edited = ShowPresetEditor("Preset " + (_state.Presets.Count + 1), current);
             if (edited == null)
             {
                 return;
@@ -2574,42 +2891,92 @@ namespace MacRando
             await RandomizeAsync(adapter, preset.RandomizeMac, preset.RandomizeIp);
         }
 
-        private AdapterPreset ShowPresetEditor(string defaultName)
+        private AdapterPreset ShowPresetEditor(string defaultName, NetworkIdentity currentNetwork)
         {
+            bool canBind = currentNetwork != null && currentNetwork.IsUsable;
             using (var dialog = new Form())
             using (var name = new TextBox { Text = defaultName ?? string.Empty, Dock = DockStyle.Fill })
             using (var randomMac = new CheckBox { Text = "Randomize MAC address", Checked = true, AutoSize = true })
             using (var randomIp = new CheckBox { Text = "Randomize local IPv4 address", AutoSize = true })
             using (var warning = new Label { Text = "DHCP consent is never stored in a preset; you must opt in again for each operation.", AutoSize = true, ForeColor = Color.DimGray })
+            using (var bindToNetwork = new CheckBox
+            {
+                Text = "Bind this preset to the current network",
+                Checked = false,
+                Enabled = canBind,
+                AutoSize = true
+            })
+            using (var boundNetwork = new Label
+            {
+                Text = canBind
+                    ? "Current network: " + currentNetwork.Description
+                    : "No network could be identified, so presets cannot be bound right now.",
+                AutoSize = true,
+                ForeColor = Color.DimGray
+            })
+            using (var autoApply = new CheckBox
+            {
+                Text = "Apply automatically when this network appears",
+                Checked = false,
+                Enabled = false,
+                AutoSize = true
+            })
+            using (var autoWarning = new Label
+            {
+                Text = "Automatic apply runs without asking. It is refused while a restore profile is pending, " +
+                    "while the restore data cannot be read, and more than once every " +
+                    NetworkAutoApply.DefaultCooldownMinutes + " minutes per preset. IP randomization is skipped on a " +
+                    "DHCP adapter, because that consent is per operation.",
+                AutoSize = true,
+                ForeColor = Color.DimGray
+            })
             {
                 dialog.Text = "Save adapter preset";
                 dialog.StartPosition = FormStartPosition.CenterParent;
                 dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
                 dialog.MinimizeBox = false;
                 dialog.MaximizeBox = false;
-                dialog.ClientSize = new Size(470, 210);
-                var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(12) };
+                dialog.ClientSize = new Size(470, 330);
+                var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 10, Padding = new Padding(12) };
                 layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
                 layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
-                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
-                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
-                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22F));
+                layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
                 layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
                 layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
                 layout.Controls.Add(new Label { Text = "Preset name", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
                 layout.Controls.Add(name, 0, 1);
                 layout.Controls.Add(randomMac, 0, 2);
                 layout.Controls.Add(randomIp, 0, 3);
-                layout.Controls.Add(warning, 0, 4);
+                layout.Controls.Add(bindToNetwork, 0, 4);
+                layout.Controls.Add(boundNetwork, 0, 5);
+                layout.Controls.Add(autoApply, 0, 6);
+                layout.Controls.Add(warning, 0, 7);
+                layout.Controls.Add(autoWarning, 0, 8);
                 var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
                 var save = new Button { Text = "Save", DialogResult = DialogResult.OK, AutoSize = true };
                 var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true };
                 buttons.Controls.Add(save);
                 buttons.Controls.Add(cancel);
-                layout.Controls.Add(buttons, 0, 5);
+                layout.Controls.Add(buttons, 0, 9);
                 dialog.Controls.Add(layout);
                 dialog.AcceptButton = save;
                 dialog.CancelButton = cancel;
+                bindToNetwork.CheckedChanged += delegate
+                {
+                    // A preset cannot be applied "when this network appears" unless it is
+                    // bound to a network in the first place.
+                    autoApply.Enabled = bindToNetwork.Checked;
+                    if (!bindToNetwork.Checked)
+                    {
+                        autoApply.Checked = false;
+                    }
+                };
                 if (dialog.ShowDialog(_form) != DialogResult.OK)
                 {
                     return null;
@@ -2626,13 +2993,18 @@ namespace MacRando
                     MessageBox.Show(_form, "Select at least one action for the preset.", "MacRando", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return null;
                 }
+                bool bind = bindToNetwork.Checked && canBind;
                 return new AdapterPreset
                 {
                     Name = presetName,
                     RandomizeMac = randomMac.Checked,
                     RandomizeIp = randomIp.Checked,
                     AllowDhcpIpRandomization = false,
-                    RestoreOnExit = false
+                    RestoreOnExit = false,
+                    BindToNetwork = bind,
+                    NetworkKey = bind ? currentNetwork.Key : null,
+                    NetworkDescription = bind ? currentNetwork.Description : null,
+                    AutoApplyOnNetworkChange = bind && autoApply.Checked
                 };
             }
         }

@@ -19,6 +19,7 @@ It can:
 - Run a read-only diagnostics/preflight report from the tray menu.
 - Show non-activating in-app status notifications with the application icon; click a notification to open the dashboard.
 - Save per-adapter action presets and apply them through the same confirmation/backup workflow.
+- Bind a preset to a specific network and optionally apply it automatically when you join that network, with consent required and several refusals built in.
 - On exit, automatically restore verified changes made during the current session without prompting.
 - Show the current public IP by querying `api.ipify.org`.
 - Connect or disconnect Windows VPN profiles that already exist in Windows Settings. A VPN is the supported way to change the public Internet IP; local software cannot assign a different public IP by itself.
@@ -149,11 +150,31 @@ A routine uninstall deliberately leaves restore profiles alone. See the uninstal
 - **Star selected** marks an adapter as a favorite. Favorites are stored per interface GUID, listed first, and shown with a star. An adapter that disappears and returns keeps its favorite status because the GUID is the key.
 - The **Adapter details** card shows the driver description, interface index, whether the driver exposes the `NetworkAddress` property, and the interface GUID MacRando uses to target the adapter.
 
+## Network-aware presets
+
+A preset can be bound to the network you are on when you save it, and can then apply itself when you join that network later. This is off unless you turn it on.
+
+**Binding.** Saving a preset offers *Bind this preset to the current network*, which records a key built from the Wi-Fi SSID when there is one, otherwise the Windows connection profile name, plus the default gateway. The gateway is included on purpose: two different networks can share a name, such as any two guest networks called `Free WiFi`, and they should not be treated as the same place. The binding is shown next to the preset in the list. Binding only records where the preset belongs; it does not arm it.
+
+**Automatic apply.** *Apply automatically when this network appears* is a separate, explicit opt-in. When it is on, MacRando watches for network changes and applies the preset without asking, because there is nobody at the keyboard to ask.
+
+It will not do this:
+
+- while a restore profile is pending, because a new change would compound one already in flight;
+- while the restore data cannot be read, because a profile that cannot be read back is not a safety net;
+- more than once every 10 minutes per preset, so an unstable gateway cannot make it churn the adapter;
+- for IP randomization on an adapter using DHCP, because that consent is per operation and is never stored in a preset;
+- if more than one preset is bound to the same network with automatic apply enabled, because picking one would be a guess.
+
+Anything it does change still goes through the normal backup, verification, and restore workflow, and each automatic apply is recorded in notification history.
+
+**Startup is separate.** Binding a preset has no effect at launch. Startup randomization remains its own setting, and startup randomization still never runs while a restore profile is pending.
+
 ## History and diagnostics
 
 **View IP change history** in the tray menu lists recent local-IP changes with the original and proposed address, prefix, DHCP state, gateway, and outcome: applied, verified, rolled back, or failed. Addresses are masked before they are written to disk, exactly like notification history.
 
-**Export diagnostic bundle** writes a timestamped ZIP to `%LOCALAPPDATA%\MacRando\diagnostic-bundles` containing a summary, the diagnostics report, the IP preflight, notification history, IP change history, the last 400 log lines, and the license. MAC and IP addresses are masked, so a bundle is safe to attach to a bug report.
+**Export diagnostic bundle** writes a timestamped ZIP to `%LOCALAPPDATA%\MacRando\diagnostic-bundles` containing a summary, the diagnostics report, the IP preflight, notification history, IP change history, the last 400 log lines, and the license. MAC and IP addresses are masked, so a bundle is safe to attach to a bug report. The summary also records the current network key, the last network key seen, and how many presets are network-bound, because those decide whether a network-aware preset can match at all.
 
 ## Trusting the development certificate
 
@@ -311,6 +332,7 @@ Unless required by applicable law or agreed to in writing, the software is provi
 ## Project layout
 
 - `src/NetworkService.cs` — adapter discovery, Windows PowerShell commands, IP selection, VPN actions, and public-IP lookup.
+- `src/NetworkAutoApply.cs` — network identity and the pure decision logic for network-bound presets.
 - `src/TrayContext.cs` — tray menu and operation workflow.
 - `src/NotificationPopup.cs` — non-activating in-app notifications with the application icon.
 - `src/NotificationCenterForm.cs` — searchable notification history and notification preferences.

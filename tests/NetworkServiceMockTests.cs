@@ -218,6 +218,11 @@ internal static class NetworkServiceMockTests
             {
                 return scriptResult;
             }
+            int networkPresetResult = NetworkPresetTests.Run();
+            if (networkPresetResult != 0)
+            {
+                return networkPresetResult;
+            }
             return 0;
         }
         catch (Exception error)

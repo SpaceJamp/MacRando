@@ -12,6 +12,17 @@ using System.Threading.Tasks;
 
 namespace MacRando
 {
+    /// <summary>
+    /// Shape returned by the network-identity PowerShell query. Kept separate from
+    /// <see cref="NetworkIdentity"/> so the deserialized payload stays minimal and the key
+    /// and description are always derived in one place.
+    /// </summary>
+    internal sealed class NetworkProfileRaw
+    {
+        public string ConnectionProfile { get; set; }
+        public string Gateway { get; set; }
+        public string Ssid { get; set; }
+    }
     internal sealed class NetworkService
     {
         private const int PowerShellTimeoutMilliseconds = 30000;
@@ -32,6 +43,52 @@ namespace MacRando
             }
             _runner = runner;
         }
+
+        /// <summary>
+        /// Read-only. Identifies the network the machine is attached to, so a preset can be
+        /// bound to it. Never changes anything, and returns an unusable identity rather than
+        /// throwing when the information is unavailable.
+        /// </summary>
+        private const string NetworkIdentityScript = @"
+$profileName = ''
+try {
+  $profile = @(Get-NetConnectionProfile -ErrorAction Stop |
+    Where-Object { $_.IPv4Connectivity -and $_.IPv4Connectivity -ne 'Disconnected' } |
+    Sort-Object -Property @{ Expression = { $_.IPv4Connectivity -eq 'Internet' }; Descending = $true } |
+    Select-Object -First 1)[0]
+  if ($null -ne $profile) { $profileName = [string]$profile.Name }
+} catch { $profileName = '' }
+
+$gateway = ''
+try {
+  $configuration = @(Get-NetIPConfiguration -ErrorAction Stop |
+    Where-Object { $_.IPv4DefaultGateway } | Select-Object -First 1)[0]
+  if ($null -ne $configuration) {
+    $route = @($configuration.IPv4DefaultGateway | Where-Object { $_.NextHop } | Select-Object -First 1)[0]
+    if ($null -ne $route) { $gateway = [string]$route.NextHop }
+  }
+} catch { $gateway = '' }
+
+$ssid = ''
+try {
+  $lines = @(& netsh.exe wlan show interfaces 2>$null)
+  $index = 0
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match '^\s*SSID\s*:') {
+      # netsh prints the state first with an empty SSID when it is not connected, so the
+      # first non-empty value is the network actually joined.
+      $value = ($lines[$i] -split ':', 2)[1].Trim()
+      if ($value.Length -gt 0) { $ssid = $value; break }
+    }
+  }
+} catch { $ssid = '' }
+
+Write-MacRandoJson64 ([pscustomobject]@{
+  ConnectionProfile = $profileName
+  Gateway           = $gateway
+  Ssid              = $ssid
+})
+";
 
         private const string AdapterScript = @"
 $items = @()
@@ -714,8 +771,34 @@ if ($code -ne 0) {
             throw new InvalidOperationException(lastProblem + " The restore profile was kept.");
         }
 
-        public Task<List<VpnProfile>> GetVpnProfilesAsync()
+        public async Task<NetworkIdentity> GetNetworkIdentityAsync()
         {
+            NetworkIdentity identity = new NetworkIdentity();
+            try
+            {
+                NetworkProfileRaw raw = await _runner.RunJsonAsync<NetworkProfileRaw>(
+                    NetworkIdentityScript, null, PowerShellTimeoutMilliseconds);
+                string profile = raw == null ? null : raw.ConnectionProfile;
+                string gateway = raw == null ? null : raw.Gateway;
+                string ssid = raw == null ? null : raw.Ssid;
+                identity.ConnectionProfile = profile;
+                identity.Gateway = gateway;
+                identity.Ssid = ssid;
+                identity.Key = NetworkIdentity.BuildKey(profile, gateway, ssid);
+                identity.Description = NetworkIdentity.BuildDescription(profile, gateway, ssid);
+            }
+            catch (Exception error)
+            {
+                // An unidentified network is not worth interrupting the user for, since the
+                // consequence is only that no preset can match. It is logged as a warning
+                // because it usually means the query itself is broken.
+                AppLogger.Warning("Could not identify the current network: " + AppLogger.Sanitize(error.Message));
+                identity.Description = "unknown network";
+            }
+            return identity;
+        }
+
+        public Task<List<VpnProfile>> GetVpnProfilesAsync()        {
             return _runner.RunJsonAsync<List<VpnProfile>>(
                 VpnListScript, null, PowerShellTimeoutMilliseconds);
         }

@@ -1,5 +1,35 @@
 # MacRando Changelog
 
+## 1.5.0 - 2026.09
+
+### Added
+
+- **Network-aware presets.** A preset can be bound to a specific network, and optionally apply itself when you join that network. This is the first feature that can change an adapter without a confirmation dialog, so it is opt-in twice: binding a preset records only where it belongs, and a separate checkbox arms it.
+- The network is identified read-only from the Wi-Fi SSID when there is one, otherwise the Windows connection profile name, combined with the default gateway. Including the gateway is deliberate: any two guest networks called `Free WiFi` must not be treated as the same place. The key is lowercased and whitespace-trimmed so casing and padding differences between sources cannot silently stop a match, and the separator is stripped from names so a crafted network name cannot impersonate another key.
+- Automatic apply is refused while a restore profile is pending, while the restore data cannot be read, more than once every 10 minutes per preset, for IP randomization on a DHCP adapter, and when two presets are bound to the same network with automatic apply enabled. Each refusal is logged with its reason and the resulting network is named.
+- `NetworkIdentity` and `NetworkAutoApply` are a pure decision layer with no UI or network access, so the rules above are tested exhaustively rather than through the interface.
+- The preset list shows the bound network next to the preset name, so a binding is visible without opening the editor.
+- The diagnostic bundle summary records the current network key, the last network key seen, and how many presets are network-bound and armed, so "the preset did not run" is answerable from the bundle alone.
+
+### Changed
+
+- A preset applied automatically still goes through the normal backup, verification, and restore workflow, and is recorded in notification history with a distinct title.
+- The network baseline is recorded during the initial refresh without acting on it. Without this, the first network change after launch would look like an arrival and would fire a bound preset on the network already in use.
+- Network events are debounced and marshalled to the UI thread. Windows raises them repeatedly while a connection is still settling, and acting on each one in turn would churn the adapter.
+- `AdapterPreset` gained `AdapterKey`, derived from the preset key rather than stored separately, so no new state has to be migrated.
+
+### Fixed
+
+- **A new PowerShell query failed silently and reported an unknown network.** The scripts return their result through a `Write-MacRandoJson64` marker, because PowerShell's default formatting turns a bare `[pscustomobject]` into a table. The first version of the network-identity script emitted the object directly, so the marker never appeared, the parse failed, and the error was swallowed into a harmless-looking "unknown network". The first symptom was that the feature could never match anything.
+- **A preset on cooldown silenced every other preset bound to the same network.** The scan returned at the first refusal, so one preset's cooldown suppressed the rest. All bound presets are now considered, and the cooldown belongs to a single preset.
+- **Two presets armed for one network resolved by dictionary order.** That is a guess about what the user meant, so it is now refused outright and reported.
+
+### Tests
+
+- Forty-nine assertions covering network key construction (SSID preference, identically named networks, casing and padding, separator injection, missing parts), the decision matrix (every refusal, cooldown including a backwards clock jump, the two-preset conflict, and a preset with a bind flag but no key), preset key parsing, and display of the bound network.
+- Presets written by 1.4.x have none of the network fields and load as unbound, so an old preset cannot accidentally match whatever network the machine happens to be on.
+- A new script-validation check requires every script that returns a result to emit it through `Write-MacRandoJson64`. This is the bug above, and it was invisible because the mock runner hands back whatever the test wants rather than what PowerShell would actually print. The check was confirmed by breaking the script on purpose and watching it fail.
+
 ## 1.4.4 - 2026.09
 
 ### Changed

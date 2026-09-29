@@ -39,10 +39,13 @@ internal static class ScriptValidationTests
     {
         public readonly List<string> Scripts = new List<string>();
         public readonly List<HashSet<string>> EnvironmentKeys = new List<HashSet<string>>();
+        // Whether the script was handed to the JSON-returning runner, which only works if
+        // the script calls Write-MacRandoJson64 to hand its result back.
+        public readonly List<bool> ViaJson = new List<bool>();
 
         public Task<PowerShellResult> RunAsync(string script, IDictionary<string, string> environment, int timeoutMilliseconds)
         {
-            Record(script, environment);
+            Record(script, environment, false);
             return Task.FromResult(new PowerShellResult
             {
                 ExitCode = 0,
@@ -53,7 +56,7 @@ internal static class ScriptValidationTests
 
         public Task<T> RunJsonAsync<T>(string script, IDictionary<string, string> environment, int timeoutMilliseconds)
         {
-            Record(script, environment);
+            Record(script, environment, true);
             object value;
             if (typeof(T) == typeof(List<AdapterInfo>))
             {
@@ -107,9 +110,10 @@ internal static class ScriptValidationTests
             return Task.FromResult((T)value);
         }
 
-        private void Record(string script, IDictionary<string, string> environment)
+        private void Record(string script, IDictionary<string, string> environment, bool viaJson)
         {
             Scripts.Add(script);
+            ViaJson.Add(viaJson);
             var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (environment != null)
             {
@@ -190,6 +194,7 @@ internal static class ScriptValidationTests
         RunAll(() => service.VerifyAppliedAsync(adapter, state, "02-00-00-00-00-04", "192.168.1.88", true, true));
         RunAll(() => service.GetVpnProfilesAsync());
         RunAll(() => service.RunVpnActionAsync(profile, true));
+        RunAll(() => service.GetNetworkIdentityAsync());
 
         if (captured.Scripts.Count == 0)
         {
@@ -225,6 +230,24 @@ internal static class ScriptValidationTests
                         "Script " + i + " reads $env:" + name + " but the C# side never sets it. " +
                         "It would silently be empty during a live change.");
                 }
+            }
+
+            // Every script that returns a result has to hand it back through the JSON
+            // writer. A script that just emits the object lets PowerShell format it as a
+            // table, the marker never appears in the output, and the parse fails at run
+            // time with an error that surfaces nowhere near the script that caused it.
+            // Scripts that return nothing, such as a change or a restore, are unaffected.
+            if (!captured.ViaJson[i])
+            {
+                continue;
+            }
+            _checks++;
+            if (script.IndexOf("Write-MacRandoJson64", StringComparison.Ordinal) < 0)
+            {
+                throw new Exception(
+                    "Script " + i + " returns a result but never calls Write-MacRandoJson64. " +
+                    "PowerShell would format the object for display instead of returning it as JSON, " +
+                    "so the caller would fail to deserialize the result.");
             }
         }
 

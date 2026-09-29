@@ -143,7 +143,7 @@ namespace MacRando
     internal static class AppInfo
     {
         public const string ProductName = "MacRando";
-        public const string Version = "1.4.4";
+        public const string Version = "1.5.0";
         public const string BuildLabel = "2026.09";
         public static string DisplayVersion { get { return Version + " (" + BuildLabel + ")"; } }
     }
@@ -158,9 +158,43 @@ namespace MacRando
         public bool AllowDhcpIpRandomization { get; set; }
         public DateTime UpdatedAtUtc { get; set; }
 
+        // Network binding. Absent in presets written before 1.5.0, so every consumer has
+        // to treat a missing NetworkKey as "not bound".
+        public bool BindToNetwork { get; set; }
+        public string NetworkKey { get; set; }
+        public string NetworkDescription { get; set; }
+        public bool AutoApplyOnNetworkChange { get; set; }
+
+        public bool IsNetworkBound
+        {
+            get
+            {
+                return BindToNetwork && !string.IsNullOrWhiteSpace(NetworkKey);
+            }
+        }
+
+        /// <summary>
+        /// The adapter this preset belongs to, taken from the preset key rather than stored
+        /// separately. Preset keys are built as adapterKey + "::" + name, and the adapter key
+        /// is an interface GUID, so the separator is unambiguous.
+        /// </summary>
+        public string AdapterKey
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(PresetKey))
+                {
+                    return string.Empty;
+                }
+                int separator = PresetKey.IndexOf("::", StringComparison.Ordinal);
+                return separator <= 0 ? string.Empty : PresetKey.Substring(0, separator);
+            }
+        }
+
         public override string ToString()
         {
-            return string.IsNullOrWhiteSpace(Name) ? "Unnamed preset" : Name;
+            string label = string.IsNullOrWhiteSpace(Name) ? "Unnamed preset" : Name;
+            return IsNetworkBound ? label + "  [" + (NetworkDescription ?? "bound network") + "]" : label;
         }
     }
 
