@@ -30,6 +30,7 @@ namespace MacRando
         private readonly ToolStripMenuItem _restoreMenu;
         private readonly ToolStripMenuItem _vpnMenu;
         private readonly ToolStripMenuItem _statusMenuItem;
+        private ToolStripMenuItem _versionMenuItem;
         private readonly ToolStripMenuItem _refreshMenuItem;
         private readonly ToolStripMenuItem _diagnosticsMenuItem;
         private readonly ToolStripMenuItem _ipPreflightMenuItem;
@@ -179,6 +180,8 @@ namespace MacRando
 
             _menu.Items.Add(open);
             _menu.Items.Add(new ToolStripSeparator());
+            _versionMenuItem = new ToolStripMenuItem(AppInfo.ProductName + " " + AppInfo.Version) { Enabled = false };
+            _menu.Items.Add(_versionMenuItem);
             _menu.Items.Add(_statusMenuItem);
             _menu.Items.Add(_publicIpMenuItem);
             _menu.Items.Add(_adaptersMenu);

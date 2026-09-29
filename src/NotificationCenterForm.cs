@@ -204,7 +204,7 @@ namespace MacRando
 
         private void BuildLayout()
         {
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(12) };
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(12) };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
@@ -267,9 +267,21 @@ namespace MacRando
             settingsLayout.Controls.Add(checkUpdates);
             settings.Controls.Add(settingsLayout);
 
+            var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
+            var versionLabel = new Label
+            {
+                Text = AppInfo.ProductName + " " + AppInfo.DisplayVersion + "  •  Apache-2.0  •  notifications are sanitized before storage",
+                AutoSize = true,
+                ForeColor = Color.FromArgb(100, 116, 139),
+                Margin = Padding.Empty
+            };
+            footer.Controls.Add(versionLabel);
+
             root.Controls.Add(toolbar, 0, 0);
             root.Controls.Add(split, 0, 1);
             root.Controls.Add(settings, 0, 2);
+            root.Controls.Add(footer, 0, 3);
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Controls.Add(root);
         }
 

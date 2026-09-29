@@ -237,7 +237,7 @@ namespace MacRando
 
         public DashboardForm()
         {
-            Text = "MacRando";
+            Text = AppInfo.ProductName + " " + AppInfo.Version;
             Icon = LoadApplicationIcon();
             ClientSize = new Size(1120, 720);
             MinimumSize = new Size(980, 620);
@@ -262,12 +262,14 @@ namespace MacRando
             _listPanel = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
             _detailsPanel = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
 
-            _titleLabel = MakeTitle("MacRando");
+            _titleLabel = MakeTitle(AppInfo.ProductName + " " + AppInfo.Version);
             _titleLabel.AutoSize = false;
             _titleLabel.Size = new Size(300, 30);
+            _toolTip.SetToolTip(_titleLabel, AppInfo.ProductName + " " + AppInfo.DisplayVersion);
             _subtitleLabel = MakeSubtitle("A safer, TMAC-inspired network adapter changer");
             _subtitleLabel.AutoSize = false;
             _subtitleLabel.Size = new Size(360, 22);
+            _toolTip.SetToolTip(_subtitleLabel, "Version " + AppInfo.DisplayVersion);
             _headerPublicIpLabel = MakeMutedLabel("Public IP: checking...");
             _adapterCountLabel = MakeMutedLabel("0 adapters");
             _listHintLabel = MakeMutedLabel("Select an adapter to view its details.");
