@@ -1,5 +1,23 @@
 # MacRando Changelog
 
+## 1.8.0 - 2026.09
+
+### Added
+
+- **Accessible names and descriptions for every interactive control.** MacRando previously set no accessible name anywhere in the codebase, so a screen reader reached the public IP address, the adapter list, the MAC entry box, and all fourteen action buttons as unlabelled controls announcing only their type. The names now say what the control acts on, and the dangerous ones carry a description of the consequence: that a restore profile is saved before a change, that DHCP consent is per operation and never stored, that a VPN is the supported way to change the public IP, and that a passwordless sign-in is the supported way to restore. That information was on screen for sighted users and had no route to anyone else.
+- **An explicit tab order** following the reading order of the page: search and filter, the adapter list, then the actions for the selected adapter. Traversal previously followed the order controls happened to be created and added, which is layout plumbing rather than reading order, so a keyboard user could land on Apply before the box whose contents it applies. The pending restore banner's Restore all leads the order when it is present, because it is the control a user reaches for when an adapter has been left changed.
+- **High contrast support.** The application used a hard-coded palette throughout, so a user who enables high contrast gets MacRando's colours overriding the system's. Every colour now comes from `SystemColors`, the dark mode toggle is ignored because the user's stated need outranks a preference they cannot see, flat custom button styling is undone so the system draws the borders, and the deliberately low-contrast secondary text collapses to full contrast, since a muted colour is the first thing to become unreadable for someone who turned high contrast on.
+
+### Fixed
+
+- **The pending restore banner's buttons had no accessible name, and were never named at all.** They are created by a layout helper and the banner is hidden until a restore is outstanding, so naming them once at startup was not enough. They are now named whenever the banner appears, and a lookup that finds no matching button is logged rather than failing silently, because a renamed button would otherwise leave an unlabelled control on screen with nothing to indicate it.
+
+### Tests
+
+- Sixty-one assertions. The high contrast palette is checked to contain no colour that is not a `SystemColors` member, so it cannot drift into a hand-picked value, and the live form is checked with high contrast forced on to confirm the palette is actually applied to a button, a label, a panel, and a text box rather than only being computed and never used.
+- The high contrast test asserts its own negative case: outside high contrast the flat style and the application's own colours must still apply, so a check that passed because the method did nothing could not pass silently.
+- The naming test walks the live control tree in both banner states and in both themes, and reports the parent of anything unnamed. The first run of it found three unnamed buttons, which is how the banner defect above was found.
+
 ## 1.7.0 - 2026.09
 
 ### Fixed

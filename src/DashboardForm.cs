@@ -382,6 +382,9 @@ namespace MacRando
             BuildDetailsPane();
             BuildRootLayout();
             WireEvents();
+            ApplyHeaderAccessibility();
+            ApplyActionAccessibility();
+            ApplyTabOrder();
             ApplyTheme(darkMode);
             UpdateActionStates();
         }
@@ -695,11 +698,40 @@ namespace MacRando
                     ? "1 adapter has a pending restore profile. Restoring returns it to the saved configuration."
                     : count + " adapters have pending restore profiles. Restoring returns them to the saved configuration.";
                 _pendingBanner.Visible = true;
+                // The banner's buttons are named on first use, and the banner is hidden
+                // until a restore is outstanding, so this has to be re-run as it appears.
+                NameOnDemandButtons(_pendingBanner, "Restore all", "Restore all pending adapters",
+                    "Restores every adapter that still has a pending restore profile.", true);
+                NameOnDemandButtons(_pendingBanner, "Dismiss", "Dismiss the pending restore banner",
+                    "Hides this banner. The pending changes are not affected.", true);
+                Accessibility.Describe(_pendingBannerLabel, "Pending restore summary", AccessibleRole.Text,
+                    count == 1
+                        ? "One adapter has a pending restore profile."
+                        : count + " adapters have pending restore profiles.");
             }
             else
             {
                 _pendingBanner.Visible = false;
             }
+        }
+
+        /// <summary>
+        /// Names the header controls. A screen reader otherwise reaches the public IP
+        /// label, the dark mode toggle, and Refresh with nothing but their values, so
+        /// "203.0.113.4" and "Refresh" are both announced as bare text.
+        /// </summary>
+        private void ApplyHeaderAccessibility()
+        {
+            Accessibility.Describe(_headerPublicIpLabel, "Public IP address", AccessibleRole.Text,
+                "The public IP address seen by websites from this machine.");
+            Accessibility.Describe(_titleLabel, "MacRando", AccessibleRole.Text,
+                "Application title and version.");
+            Accessibility.Describe(_subtitleLabel, "Adapter changer description", AccessibleRole.Text,
+                "A one line description of what this application does.");
+            Accessibility.Describe(_darkModeCheckBox, "Dark mode", AccessibleRole.CheckButton,
+                "Switches between the dark and light appearance.");
+            Accessibility.Describe(_refreshButton, "Refresh adapters", AccessibleRole.PushButton,
+                "Re-reads the adapter list, network state, and public IP address.");
         }
 
         private void BuildHeader()
@@ -753,6 +785,190 @@ namespace MacRando
             _refreshButton.Margin = Padding.Empty;
             layout.Controls.Add(_refreshButton, 3, 0);
             _headerPanel.Controls.Add(layout);
+        }
+
+        /// <summary>
+        /// Names the action controls and the inputs they act on.
+        ///
+        /// The dangerous ones carry a description explaining the consequence, because a
+        /// button labelled only "Randomize local IPv4 address" does not convey that it
+        /// changes the machine's address, and the DHCP consent box does not convey that it
+        /// is per operation and never stored. That is exactly the information a screen
+        /// reader user needs and currently has no route to.
+        /// </summary>
+        private void ApplyActionAccessibility()
+        {
+            Accessibility.Describe(_randomizeBothButton, "Randomize MAC address and local IP address", AccessibleRole.PushButton,
+                "Changes both the MAC address and the local IPv4 address. A restore profile is saved first.");
+            Accessibility.Describe(_randomizeMacButton, "Randomize MAC address", AccessibleRole.PushButton,
+                "Applies a random locally administered unicast MAC address. A restore profile is saved first.");
+            Accessibility.Describe(_randomizeIpButton, "Randomize local IPv4 address", AccessibleRole.PushButton,
+                "Applies a temporary static IPv4 address in the current subnet. A restore profile is saved first.");
+            Accessibility.Describe(_applyMacButton, "Apply entered MAC address", AccessibleRole.PushButton,
+                "Applies the MAC address typed in the box. A restore profile is saved first.");
+            Accessibility.Describe(_macTextBox, "MAC address to apply", AccessibleRole.Text,
+                "Type a unicast MAC address in the form 02-00-00-00-00-03, then use Apply.");
+            Accessibility.Describe(_restoreButton, "Restore this session's changes", AccessibleRole.PushButton,
+                "Restores the adapter to the state saved when this session began.");
+            Accessibility.Describe(_restorePermanentButton, "Restore the adapter's permanent MAC address", AccessibleRole.PushButton,
+                "Restores the MAC address the hardware reports as permanent. Use after a forced shutdown.");
+            Accessibility.Describe(_connectVpnButton, "Connect VPN profile", AccessibleRole.PushButton,
+                "Connects the VPN profile chosen in the list. A VPN is the supported way to change the public IP address.");
+            Accessibility.Describe(_disconnectVpnButton, "Disconnect VPN profile", AccessibleRole.PushButton,
+                "Disconnects the VPN profile chosen in the list.");
+            Accessibility.Describe(_vpnCombo, "VPN profile", AccessibleRole.ComboBox,
+                "Windows VPN profiles already configured in Settings. The list is empty if none exist.");
+            Accessibility.Describe(_presetCombo, "Adapter preset", AccessibleRole.ComboBox,
+                "Saved presets for the selected adapter. The list shows any network a preset is bound to.");
+            Accessibility.Describe(_savePresetButton, "Save preset", AccessibleRole.PushButton,
+                "Saves the current options as a named preset, optionally bound to the current network.");
+            Accessibility.Describe(_applyPresetButton, "Apply preset", AccessibleRole.PushButton,
+                "Applies the selected preset through the same backup and verification workflow as the manual actions.");
+            Accessibility.Describe(_startupRandomizeButton, "Startup MAC randomization", AccessibleRole.PushButton,
+                "Enables or disables randomizing the MAC address when Windows starts. Never runs while a restore profile is pending.");
+            Accessibility.Describe(_notificationCenterButton, "Notification center", AccessibleRole.PushButton,
+                "Opens the notification history and settings.");
+            Accessibility.Describe(_ipPreflightButton, "IP preflight", AccessibleRole.PushButton,
+                "A read-only report of what an IP change would alter. Changes nothing.");
+            Accessibility.Describe(_allowDhcpIpCheckBox, "Allow DHCP IP randomization", AccessibleRole.CheckButton,
+                "Risky. Consent is required for each operation and is never stored. An adapter using DHCP cannot be randomized without it.");
+            Accessibility.Describe(_connectedOnlyCheckBox, "Connected adapters only", AccessibleRole.CheckButton,
+                "Hides adapters that are not currently connected.");
+            Accessibility.Describe(_adapterSearchBox, "Search adapters", AccessibleRole.Text,
+                "Filters the adapter list by name or hardware description.");
+            Accessibility.Describe(_adapterList, "Physical network adapters", AccessibleRole.List,
+                "Use the up and down arrows to move between adapters. The current adapter's details appear in the panel to the right.");
+            Accessibility.Describe(_adapterCountLabel, "Adapter count", AccessibleRole.Text,
+                "How many adapters are shown and how many exist in total.");
+            Accessibility.Describe(_listHintLabel, "Adapter list help", AccessibleRole.Text,
+                "How to move between and select adapters.");
+            Accessibility.Describe(_pendingBanner, "Pending restore", AccessibleRole.Text,
+                "Shown when an adapter still has changes that have not been restored.");
+            Accessibility.Describe(_operationStatusLabel, "Operation status", AccessibleRole.Text,
+                "The most recent operation and its result.");
+            Accessibility.Describe(_safetySummaryLabel, "Safety summary", AccessibleRole.Text,
+                "How MacRando saves and restores adapter changes.");
+
+            // Created on demand by the layout helpers, so they cannot be named in the
+            // field initialisers. The pending banner's Restore all is the one that
+            // matters most: it is the button a user reaches for when an adapter is left
+            // changed, and it is only present when something needs restoring.
+            NameOnDemandButtons(this, "Star selected", "Favorite the selected adapter",
+                "Marks this adapter as a favorite. Favorites are stored per interface GUID.", true);
+            // Both of these live in the pending banner, which is hidden until a restore is
+            // actually outstanding, so they are absent until then and the lookup is
+            // retried whenever the banner appears.
+            NameOnDemandButtons(this, "Restore all", "Restore all pending adapters",
+                "Restores every adapter that still has a pending restore profile.", false);
+            NameOnDemandButtons(this, "Dismiss", "Dismiss the pending restore banner",
+                "Hides this banner. The pending changes are not affected.", false);
+        }
+
+        /// <summary>
+        /// <summary>
+        /// Names buttons the layout helpers create at runtime. Matching on visible text is
+        /// the only handle available, so the result is asserted: a renamed button would
+        /// otherwise fail silently and leave an unlabelled control on screen, which is the
+        /// exact defect this exists to prevent.
+        /// </summary>
+        private void NameOnDemandButtons(Control root, string text, string name, string description, bool required)
+        {
+            bool found = false;
+            foreach (Control control in EnumerateControls(root))
+            {
+                Button button = control as Button;
+                if (button != null && string.Equals(button.Text, text, StringComparison.Ordinal) &&
+                    string.IsNullOrWhiteSpace(button.AccessibleName))
+                {
+                    Accessibility.Describe(button, name, AccessibleRole.PushButton, description);
+                    found = true;
+                }
+            }
+            if (required && !found)
+            {
+                AppLogger.Warning("Accessibility: expected to find a button labelled \"" + text +
+                    "\" to name, but it was not present.");
+            }
+        }
+
+        internal static List<Control> EnumerateControls(Control root)
+        {
+            var found = new List<Control>();
+            if (root == null)
+            {
+                return found;
+            }
+            foreach (Control child in root.Controls)
+            {
+                found.Add(child);
+                found.AddRange(EnumerateControls(child));
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// Sets an explicit tab order following the reading order of the page: search and
+        /// filter, the adapter list, then the actions for the selected adapter in the order
+        /// they appear.
+        ///
+        /// Without this, traversal follows the order the controls happened to be created
+        /// and added, which is layout-plumbing order rather than reading order, so a
+        /// keyboard user can land on Apply before the box it applies. Ordering is asserted
+        /// by test, because a tab order that silently reverts to z-order is exactly the kind
+        /// of regression nothing else would catch.
+        /// </summary>
+        private void ApplyTabOrder()
+        {
+            // The pending banner's Restore all is the highest-value target when it is
+            // present, so it leads. It is created on demand, hence the lookup.
+            Control restoreAll = null;
+            foreach (Control control in EnumerateControls(this))
+            {
+                Button button = control as Button;
+                if (button != null && string.Equals(button.Text, "Restore all", StringComparison.Ordinal) &&
+                    button.Visible)
+                {
+                    restoreAll = button;
+                    break;
+                }
+            }
+
+            var sequence = new List<Control>();
+            if (restoreAll != null)
+            {
+                sequence.Add(restoreAll);
+            }
+            sequence.AddRange(new Control[]
+            {
+                _darkModeCheckBox,
+                _refreshButton,
+                _adapterSearchBox,
+                _connectedOnlyCheckBox,
+                _adapterList,
+                _macTextBox,
+                _vpnCombo,
+                _presetCombo,
+                _applyMacButton,
+                _randomizeMacButton,
+                _randomizeBothButton,
+                _randomizeIpButton,
+                _savePresetButton,
+                _applyPresetButton,
+                _connectVpnButton,
+                _disconnectVpnButton,
+                _restorePermanentButton,
+                _restoreButton,
+                _startupRandomizeButton,
+                _ipPreflightButton,
+                _notificationCenterButton
+            });
+            for (int index = 0; index < sequence.Count; index++)
+            {
+                if (sequence[index] != null)
+                {
+                    sequence[index].TabIndex = index;
+                }
+            }
         }
 
         private void BuildListPane()
@@ -1461,18 +1677,32 @@ namespace MacRando
             }
         }
 
+        private bool _highContrastActive;
+
         private void ApplyTheme(bool dark)
         {
             bool themeSaved = SaveThemePreference(dark);
             _darkMode = dark;
-            Color background = dark ? Color.FromArgb(15, 23, 42) : Color.FromArgb(245, 247, 250);
-            Color surface = dark ? Color.FromArgb(30, 41, 59) : Color.White;
-            Color input = dark ? Color.FromArgb(15, 23, 42) : Color.White;
-            Color text = dark ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59);
-            Color secondary = dark ? Color.FromArgb(148, 163, 184) : Color.FromArgb(71, 85, 105);
-            Color accent = dark ? Color.FromArgb(96, 165, 250) : Color.FromArgb(37, 99, 235);
-            Color border = dark ? Color.FromArgb(71, 85, 105) : Color.FromArgb(203, 213, 225);
-            Color listHeader = dark ? Color.FromArgb(51, 65, 85) : Color.FromArgb(226, 232, 240);
+
+            // High contrast wins over the dark mode toggle. The user has told the system
+            // they need a specific palette, and MacRando's own colours would override that
+            // decision with a preference they cannot see.
+            bool highContrast = Accessibility.ShouldUseHighContrast();
+            HighContrastPalette palette = Accessibility.BuildPalette(highContrast, dark);
+
+            Color background = highContrast
+                ? palette.Surface
+                : (dark ? Color.FromArgb(15, 23, 42) : Color.FromArgb(245, 247, 250));
+            Color surface = highContrast ? palette.Surface : (dark ? Color.FromArgb(30, 41, 59) : Color.White);
+            Color input = highContrast ? palette.Surface : (dark ? Color.FromArgb(15, 23, 42) : Color.White);
+            Color text = highContrast ? palette.Text : (dark ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59));
+            // Muted text is folded back to full-contrast text in high contrast, because a
+            // deliberately low-contrast secondary is the first thing to become unreadable.
+            Color secondary = highContrast ? palette.Text : (dark ? Color.FromArgb(148, 163, 184) : Color.FromArgb(71, 85, 105));
+            Color accent = highContrast ? palette.Accent : (dark ? Color.FromArgb(96, 165, 250) : Color.FromArgb(37, 99, 235));
+            Color border = highContrast ? palette.Border : (dark ? Color.FromArgb(71, 85, 105) : Color.FromArgb(203, 213, 225));
+            Color listHeader = highContrast ? palette.SurfaceAlt : (dark ? Color.FromArgb(51, 65, 85) : Color.FromArgb(226, 232, 240));
+            _highContrastActive = highContrast;
             _listInputColor = input;
             _listHeaderColor = listHeader;
             _listTextColor = text;
@@ -1502,6 +1732,37 @@ namespace MacRando
 
         private void ApplyControlTheme(Control control, Color background, Color surface, Color input, Color text, Color secondary, Color accent, Color border, Color listHeader)
         {
+            if (_highContrastActive)
+            {
+                // Under high contrast the OS draws the borders, so the flat custom styling
+                // is undone rather than reinforced, and every colour comes from the
+                // user's own SystemColors choice.
+                if (control is Button || control is TextBox || control is ComboBox || control is CheckBox || control is ListView || control is NumericUpDown)
+                {
+                    control.BackColor = SystemColors.Window;
+                    control.ForeColor = SystemColors.WindowText;
+                }
+                if (control is ButtonBase)
+                {
+                    ButtonBase button = (ButtonBase)control;
+                    button.FlatStyle = FlatStyle.Standard;
+                    button.UseVisualStyleBackColor = true;
+                }
+                if (control is Panel || control is TableLayoutPanel || control is Form)
+                {
+                    control.BackColor = SystemColors.Window;
+                    control.ForeColor = SystemColors.WindowText;
+                }
+                if (control is Label)
+                {
+                    control.BackColor = Color.Transparent;
+                    control.ForeColor = SystemColors.WindowText;
+                }
+
+                // Returned rather than falling through: the custom styling below would
+                // immediately put the flat style and the app's own colours back.
+                return;
+            }
             if (control is Form)
             {
                 control.BackColor = background;

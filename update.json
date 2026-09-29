@@ -1,8 +1,8 @@
 {
-    "Version":  "1.7.0",
-    "DownloadUrl":  "https://github.com/SpaceJamp/MacRando/releases/download/v1.7.0/MacRando-1.7.0.exe",
-    "Sha256":  "DF1E4D346ABB1FE6E1857A18329570AAA5C205C5A93873AAF92B3747C49F507C",
+    "Version":  "1.8.0",
+    "DownloadUrl":  "https://github.com/SpaceJamp/MacRando/releases/download/v1.8.0/MacRando-1.8.0.exe",
+    "Sha256":  "3DE93F1FB37C952A51648D55B250A83CFBEBEEF7DE0E95D780A38E356F2EBFB5",
     "SignerThumbprint":  "8804295F8D8615DC1D137720847672ABA1342FEC",
-    "ReleaseNotesUrl":  "https://github.com/SpaceJamp/MacRando/releases/tag/v1.7.0",
-    "PublishedUtc":  "2026-09-29T23:23:59.2110372Z"
+    "ReleaseNotesUrl":  "https://github.com/SpaceJamp/MacRando/releases/tag/v1.8.0",
+    "PublishedUtc":  "2026-09-29T23:32:32.5120222Z"
 }

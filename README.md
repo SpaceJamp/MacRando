@@ -143,6 +143,14 @@ If MacRando is killed, crashes, or loses power mid-change, the saved restore pro
 
 A routine uninstall deliberately leaves restore profiles alone. See the uninstall section below.
 
+## Accessibility and high contrast
+
+Every interactive control carries an accessible name, and the ones that change something carry a description of the consequence. A button reading only "Randomize local IPv4 address" does not convey that a restore profile is saved first, or that the DHCP consent is per operation and never stored, so those facts are attached to the control rather than left to be inferred from the visible label.
+
+Tab order follows the reading order of the page, not the order the controls happen to be constructed. The pending restore banner's **Restore all** leads when it is visible.
+
+High contrast is honoured. Every colour comes from `SystemColors` so the user's own choice is what renders, the dark mode toggle is ignored while it is active, the flat custom button styling is undone so the system draws the borders, and the low-contrast secondary text becomes full contrast.
+
 ## Adapter list
 
 - **Search** filters by adapter name or hardware description.
@@ -373,6 +381,7 @@ Unless required by applicable law or agreed to in writing, the software is provi
 - `src/NetworkAutoApply.cs` — network identity and the pure decision logic for network-bound presets.
 - `src/DeviceTrackingService.cs` — read-only device tracking and diagnostic data inspection.
 - `src/RetentionPolicy.cs` — bounded on-disk footprint for rotated logs and diagnostic bundles.
+- `src/Accessibility.cs` — accessible names, roles, and the high-contrast palette.
 - `src/TrayContext.cs` — tray menu and operation workflow.
 - `src/NotificationPopup.cs` — non-activating in-app notifications with the application icon.
 - `src/NotificationCenterForm.cs` — searchable notification history and notification preferences.

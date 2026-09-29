@@ -233,6 +233,11 @@ internal static class NetworkServiceMockTests
             {
                 return retentionResult;
             }
+            int accessibilityResult = AccessibilityTests.Run();
+            if (accessibilityResult != 0)
+            {
+                return accessibilityResult;
+            }
             return 0;
         }
         catch (Exception error)
