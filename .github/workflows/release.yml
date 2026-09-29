@@ -78,29 +78,20 @@ jobs:
           '@
           $notes = $notes.Replace('__VERSION__', $env:VERSION).Trim()
 
-          # A release is stored under its tag, so deleting and re-pushing a tag can leave a
-          # stale release behind. If one exists but points at a different commit, replace it,
-          # otherwise the run would "succeed" while uploading to a release that is about to
-          # disappear.
-          $existingJson = & gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json tagName,targetCommitish 2>$null
-          $needsCreate = $true
-          if ($LASTEXITCODE -eq 0 -and $existingJson) {
-            $existingCommit = ''
-            & git rev-list -n 1 $env:TAG 2>$null | ForEach-Object { $existingCommit = $_.Trim() }
-            if ($existingCommit -and $existingCommit -eq $env:SHA) {
-              Write-Host "Release $env:TAG already points at $env:SHA; uploading the unsigned build to it."
-              & gh release upload $env:TAG $unsigned --repo $env:GITHUB_REPOSITORY --clobber 2>&1 |
-                ForEach-Object { Write-Host $_ }
-              $needsCreate = $false
-            }
-            else {
-              Write-Host "Release $env:TAG exists but points at '$existingCommit' rather than $env:SHA. Recreating it."
-              & gh release delete $env:TAG --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>&1 |
-                ForEach-Object { Write-Host $_ }
+          # A release is bound to its tag, so a release for this tag is either the right
+          # one (a re-run of the same tag: upload to it) or absent (create it). Comparing
+          # the tag's commit against github.sha cannot detect a stale release, because the
+          # tag is always pushed at the current commit.
+          & gh release view $env:TAG --repo $env:GITHUB_REPOSITORY 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $env:TAG already exists; uploading the unsigned build to it."
+            & gh release upload $env:TAG $unsigned --repo $env:GITHUB_REPOSITORY --clobber 2>&1 |
+              ForEach-Object { Write-Host $_ }
+            if ($LASTEXITCODE -ne 0) {
+              throw "gh release upload failed with exit code $LASTEXITCODE for tag $env:TAG"
             }
           }
-
-          if ($needsCreate) {
+          else {
             Write-Host "Creating release $env:TAG at $env:SHA"
             $ghArgs = @(
               'release', 'create', $env:TAG, $unsigned,
@@ -114,11 +105,13 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "gh release create failed with exit code $LASTEXITCODE for tag $env:TAG"
             }
-            # Confirm the release really exists; a silent no-op here would ship nothing.
-            & gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json tagName 2>&1 |
-              ForEach-Object { Write-Host $_ }
-            if ($LASTEXITCODE -ne 0) {
-              throw "Release $env:TAG was not created. Check that the workflow token has 'contents: write'."
-            }
-            Write-Host 'Release step completed.'
           }
+
+          # A silent no-op here would report success while shipping nothing, which is
+          # exactly what happened when a deleted tag left a ghost release behind.
+          $verify = & gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json tagName 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release $env:TAG does not exist after the release step. Check that the workflow token has 'contents: write' and that the tag was not deleted mid-run."
+          }
+          $verify | ForEach-Object { Write-Host $_ }
+          Write-Host 'Release step completed.'
