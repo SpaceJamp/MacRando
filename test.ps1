@@ -29,7 +29,8 @@ $sources = @(
     (Join-Path $root 'src\DashboardForm.cs'),
     (Join-Path $root 'tests\NetworkServiceMockTests.cs'),
     (Join-Path $root 'tests\UpgradeRegressionTests.cs'),
-    (Join-Path $root 'tests\ContrastTests.cs')
+    (Join-Path $root 'tests\ContrastTests.cs'),
+    (Join-Path $root 'tests\ScriptValidationTests.cs')
 )
 $references = @(
     '/reference:System.dll',
@@ -47,4 +48,11 @@ if ($LASTEXITCODE -ne 0) {
 & $output
 if ($LASTEXITCODE -ne 0) {
     throw "Mock tests failed with exit code $LASTEXITCODE."
+}
+
+# The update install helper is exercised end to end against a stub executable:
+# install, rollback on crash, and no false rollback on a slow start.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tests\TestUpdateHelper.ps1')
+if ($LASTEXITCODE -ne 0) {
+    throw "Update helper end-to-end test failed with exit code $LASTEXITCODE."
 }

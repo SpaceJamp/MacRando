@@ -213,6 +213,11 @@ internal static class NetworkServiceMockTests
             {
                 return contrastResult;
             }
+            int scriptResult = ScriptValidationTests.Run();
+            if (scriptResult != 0)
+            {
+                return scriptResult;
+            }
             return 0;
         }
         catch (Exception error)

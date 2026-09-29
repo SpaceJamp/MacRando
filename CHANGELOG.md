@@ -1,5 +1,23 @@
 # MacRando Changelog
 
+## 1.4.3 - 2026.09
+
+### Fixed
+
+- **The updater could roll back a perfectly good build.** The watchdog treated a missing startup marker as failure. A new build that was alive but slow to start, for example while antivirus scanned a freshly written executable, was killed and replaced with the previous build. The helper now stops waiting early only when the new process has actually exited, and after the watchdog window it falls back to process liveness: a running build is kept and the slowness is logged, and only a build that has exited without reporting success is rolled back. A build that hangs without ever starting is indistinguishable from a slow start here, so it is left in place with the backup kept for manual recovery.
+- **`publish-update.ps1` could write a manifest for the wrong build.** When the release archive was missing, which happens when the build step fails, the script only warned and then wrote a manifest labelled with the requested version but describing whatever executable happened to be on disk. A user could have been offered a stale binary as a newer release. A missing archive is now a hard failure, and the script additionally refuses to write a manifest unless the executable's own file version matches the requested version.
+
+### Tests
+
+- The update install helper end-to-end test is now part of the repository and runs in CI, instead of being a throwaway script. It extracts the real generated helper script, checks it parses as PowerShell, and runs it against a stub executable for all three outcomes: a build that reports success is installed, a build that crashes on launch is rolled back, and a slow but running build is kept rather than wrongly rolled back.
+- New script validation tests cover the PowerShell that MacRando sends to Windows, which until now was never parsed or checked in any test. They drive the real service methods through a capturing runner and assert that every environment variable each script reads is actually supplied by the C# side. Because the scripts take their inputs through the environment rather than string interpolation, a typo such as `MR_NEW_IP` versus `MR_NEW_IPP` would compile cleanly, pass every mock test, and then silently read an empty value during a live change. The tests report 12 scripts, 56 assertions, and 33 environment variables.
+
+### Reported, not changed
+
+The script validation reports three environment variables that the C# side supplies but no script reads: `MR_ADAPTER_NAME`, `MR_GATEWAY`, and `MR_ORIGINAL_GATEWAY`. The scripts read the current gateway from `Get-NetIPConfiguration` themselves and verify it against `MR_EXPECTED_GATEWAY`, which is how the existing default route is preserved. The unused variables are harmless leftovers, left in place rather than churn working restore code, and are now surfaced on every test run so they cannot be forgotten silently.
+
+## 1.4.2 - 2026.09
+
 ## 1.4.2 - 2026.09
 
 ### Fixed

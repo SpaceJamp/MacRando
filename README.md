@@ -201,7 +201,7 @@ A running executable cannot overwrite its own image, so MacRando hands the work 
 4. starts the new build, and
 5. watches for a startup marker the new build writes once it has genuinely started.
 
-If the marker never appears, the helper stops the unresponsive process, restores the previous build, and launches it again. A failed update therefore leaves you with a working MacRando rather than a broken executable. Every step is recorded in:
+If the marker never appears, the helper checks whether the new process is still running. A build that is alive but slow to start, for example while antivirus scans the newly written file, is kept rather than replaced. Only a build that has actually exited without reporting success is rolled back: the helper restores the previous build and launches it again, so a failed update leaves you with a working MacRando rather than a broken executable. Every step is recorded in:
 
 ```text
 %LOCALAPPDATA%\MacRando\update-install.log
@@ -209,7 +209,7 @@ If the marker never appears, the helper stops the unresponsive process, restores
 
 Install is refused, with the reason shown in the report, when the download is not fully verified, when a restore profile is still pending, when an adapter, restore, or VPN operation is running, or when the manifest version is not newer than the installed version.
 
-Rollback covers a build that fails to *start*. A build that starts and later fails during an adapter refresh is left in place, because replacing the executable over a transient network error would cause more harm than it solves.
+Rollback covers a build that fails to *start*. A build that starts and later fails during an adapter refresh is left in place, because replacing the executable over a transient network error would cause more harm than it solves. A build that hangs without ever starting looks the same as a slow start, so it is also left in place, with the previous build kept at the path above for a manual recovery.
 
 The manifest is published as an asset on each GitHub release. Point the updater at the **latest release** copy rather than a file on `main`:
 
@@ -324,4 +324,4 @@ Unless required by applicable law or agreed to in writing, the software is provi
 - `installer.iss` — optional Inno Setup installer template.
 - `.github/workflows/ci.yml` — build and mock-test checks on every push and pull request.
 - `.github/workflows/release.yml` — tag-triggered test, build, and unsigned release staging.
-- `test.ps1` / `tests` — non-network mock-provider, settings, and upgrade-regression tests.
+- `test.ps1` / `tests` — non-network mock-provider, settings, upgrade-regression, contrast, update-helper end-to-end, and PowerShell script validation tests.

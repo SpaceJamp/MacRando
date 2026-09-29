@@ -261,32 +261,39 @@ try {
     Write-Log ('started the new build (pid ' + $started.Id + ')')
 
     $markerDeadline = (Get-Date).AddMilliseconds($watchdogMs)
-    $ok = $false
+    $markerSeen = $false
     while ((Get-Date) -lt $markerDeadline) {
-        if (Test-Path -LiteralPath $marker) { $ok = $true; break }
+        if (Test-Path -LiteralPath $marker) { $markerSeen = $true; break }
+        # Stop waiting early only if the new build has already exited. A build that is still
+        # running may simply be slow to start, and rolling that back would replace a
+        # perfectly good build.
+        if (-not (Get-Process -Id $started.Id -ErrorAction SilentlyContinue)) { break }
         Start-Sleep -Milliseconds 250
     }
 
-    if (-not $ok) {
-        Write-Log 'the new build did not report a successful start; rolling back'
-        # A hung build still holds the executable open, and Windows will not let the file be
-        # overwritten. Stop it first, otherwise the rollback silently fails and the user is
-        # left with a broken installation.
-        try {
-            $lingering = Get-Process -Id $started.Id -ErrorAction SilentlyContinue
-            if ($lingering) {
-                Write-Log ('stopping the unresponsive new build (pid ' + $started.Id + ')')
-                Stop-Process -Id $started.Id -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Milliseconds 600
-            }
-        } catch { Write-Log 'could not stop the unresponsive build' }
-
-        Copy-Item -LiteralPath $backup -Destination $target -Force
-        Write-Log 'rolled back to the previous build'
-        Start-Process -FilePath $target | Out-Null
+    if ($markerSeen) {
+        Write-Log 'the new build reported a successful start'
     }
     else {
-        Write-Log 'the new build started successfully'
+        # No startup marker. Fall back to whether the process is actually alive: a slow start
+        # is acceptable, a process that has already exited is not. A build that hangs without
+        # ever starting is not distinguishable from a slow start here, so it is left in place
+        # and the backup is kept for a manual recovery.
+        $alive = $null -ne (Get-Process -Id $started.Id -ErrorAction SilentlyContinue)
+        if ($alive) {
+            Write-Log ('the new build is still running after ' + $watchdogMs + 'ms without writing its marker; treating a slow start as healthy')
+        }
+        else {
+            Write-Log 'the new build exited without reporting a successful start; rolling back'
+            try {
+                $lingering = Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($target)) -ErrorAction SilentlyContinue
+                if ($lingering) { $lingering | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 600 }
+                Copy-Item -LiteralPath $backup -Destination $target -Force
+                Write-Log 'rolled back to the previous build'
+                Start-Process -FilePath $target | Out-Null
+            }
+            catch { Write-Log ('the rollback failed: ' + $_.Exception.Message) }
+        }
     }
 }
 catch {

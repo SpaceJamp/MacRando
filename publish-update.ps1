@@ -68,6 +68,15 @@ $executableHash = (Get-FileHash -LiteralPath $Executable -Algorithm SHA256).Hash
 
 # If a release archive exists, make sure the archive really contains the binary that
 # was just signed. Otherwise a published ZIP and the signed executable could drift apart.
+#
+# This is a hard failure, not a warning. A manifest describes one specific artifact, and a
+# missing archive usually means the build step failed, in which case the executable on
+# disk is a stale build from an earlier version.
+$exeFileVersion = (Get-Item -LiteralPath $Executable).VersionInfo.FileVersion
+if ($exeFileVersion -ne ($Version + '.0')) {
+    throw "The executable reports file version '$exeFileVersion' but the manifest is being written for '$Version'. Rebuild before publishing."
+}
+
 if (Test-Path $Archive) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
@@ -95,7 +104,7 @@ if (Test-Path $Archive) {
         $zip.Dispose()
     }
 } else {
-    Write-Warning ("Archive not found, skipping archive verification: " + $Archive)
+    throw ("Release archive not found: " + $Archive + "`nRun package.ps1 before publishing. Refusing to write a manifest for an unverified build.")
 }
 
 $manifest = [ordered]@{
