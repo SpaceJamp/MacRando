@@ -34,7 +34,9 @@ $sources = @(
     (Join-Path $root 'tests\ContrastTests.cs'),
     (Join-Path $root 'tests\ScriptValidationTests.cs'),
     (Join-Path $root 'tests\NetworkPresetTests.cs'),
-    (Join-Path $root 'tests\DeviceTrackingTests.cs')
+    (Join-Path $root 'tests\DeviceTrackingTests.cs'),
+    (Join-Path $root 'src\RetentionPolicy.cs'),
+    (Join-Path $root 'tests\RetentionTests.cs')
 )
 $references = @(
     '/reference:System.dll',

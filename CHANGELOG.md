@@ -1,5 +1,22 @@
 # MacRando Changelog
 
+## 1.7.0 - 2026.09
+
+### Fixed
+
+- **Log rotation never deleted anything.** The log was moved aside at 1 MB and left there, so rotation freed nothing and the folder grew by a megabyte per rotation forever. A user with a failing adapter in a loop would accumulate archives indefinitely. The newest 5 archives are now kept and older ones removed.
+- **Diagnostic bundles accumulated without bound.** The `diagnostic-bundles` folder was never pruned by anything, and each bundle is a few hundred kilobytes. The newest 10 are kept and older ones removed as new bundles are written.
+- **Two log rotations inside the same second could lose the log.** Archive names used second resolution, so a second rotation in the same second targeted an existing file, the move threw, and the `catch` swallowed it. Names now carry milliseconds.
+
+### Added
+
+- `RetentionPolicy`, with the ordering rules separated from the deletion so they can be tested without a filesystem. Files are ordered by last-write time then by name, so a tie is broken deterministically instead of by whatever order the filesystem enumeration returned, which matters because the enumeration is not stable and a tie otherwise risks pruning the same file twice.
+- Retention refuses any name containing invalid path characters, so a file name can never escape the directory it was selected from. The current log is never a candidate: it has no timestamp in its name and so never matches the archive pattern.
+
+### Tests
+
+- Twenty-nine assertions covering the ordering, the limits, oldest-first deletion, deterministic tie-breaking, and the real deletion against temporary directories, including that a file held open by another process is skipped while the deletable ones beside it are still removed. A file that cannot be deleted is left alone rather than turned into a startup failure.
+
 ## 1.6.1 - 2026.09
 
 ### Fixed

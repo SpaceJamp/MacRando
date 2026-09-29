@@ -198,6 +198,22 @@ The report is also included in the diagnostic bundle as `device-tracking.txt`, a
 
 **Export diagnostic bundle** writes a timestamped ZIP to `%LOCALAPPDATA%\MacRando\diagnostic-bundles` containing a summary, the diagnostics report, the IP preflight, notification history, IP change history, the last 400 log lines, and the license. MAC and IP addresses are masked, so a bundle is safe to attach to a bug report. The summary also records the current network key, the last network key seen, and how many presets are network-bound, because those decide whether a network-aware preset can match at all.
 
+## What MacRando keeps on disk
+
+Everything lives under `%LOCALAPPDATA%\MacRando`. The footprint is bounded, so a long-running install does not grow without limit:
+
+| What | Bound |
+|---|---|
+| `macrando.log` | live log, rotated at 1 MB |
+| `macrando-<timestamp>.log` | newest **5** archives kept, older removed |
+| `diagnostic-bundles\*.zip` | newest **10** kept, older removed |
+| `state.json` | one file, with a `.bak` alongside |
+| `*-latest.txt` | overwritten each run, one copy of each |
+
+Rotation alone is not retention: moving a file aside frees nothing, so the archives are actively deleted. A file that cannot be deleted, for instance one another process holds open, is left in place rather than treated as an error.
+
+Nothing is written outside that folder, and nothing is uploaded anywhere.
+
 ## Trusting the development certificate
 
 Release builds are signed with a self-signed development certificate, so Windows shows an unknown-publisher warning until that certificate is trusted on the machine running the build.
@@ -356,6 +372,7 @@ Unless required by applicable law or agreed to in writing, the software is provi
 - `src/NetworkService.cs` — adapter discovery, Windows PowerShell commands, IP selection, VPN actions, and public-IP lookup.
 - `src/NetworkAutoApply.cs` — network identity and the pure decision logic for network-bound presets.
 - `src/DeviceTrackingService.cs` — read-only device tracking and diagnostic data inspection.
+- `src/RetentionPolicy.cs` — bounded on-disk footprint for rotated logs and diagnostic bundles.
 - `src/TrayContext.cs` — tray menu and operation workflow.
 - `src/NotificationPopup.cs` — non-activating in-app notifications with the application icon.
 - `src/NotificationCenterForm.cs` — searchable notification history and notification preferences.

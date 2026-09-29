@@ -75,22 +75,46 @@ namespace MacRando
             return sanitized.Replace("\r", " ").Replace("\n", " ").Trim();
         }
 
+        private const int KeptLogArchives = RetentionPolicy.DefaultKeptLogArchives;
+
         private static void RotateIfNeeded()
         {
             try
             {
-                if (!File.Exists(LogPath) || new FileInfo(LogPath).Length < 1024 * 1024)
+                string directory = Path.GetDirectoryName(LogPath);
+                if (File.Exists(LogPath) && new FileInfo(LogPath).Length >= 1024 * 1024)
                 {
-                    return;
+                    // Second resolution, so a second rotation inside the same second would
+                    // otherwise collide on the destination name and throw, losing the log.
+                    string archived = Path.Combine(
+                        directory,
+                        "macrando-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + ".log");
+                    File.Move(LogPath, archived);
                 }
-                string archived = Path.Combine(
-                    Path.GetDirectoryName(LogPath),
-                    "macrando-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".log");
-                File.Move(LogPath, archived);
+
+                // Rotation only frees the live file's name, so the archives have to be
+                // trimmed here or they accumulate without bound.
+                RetentionPolicy.Apply(directory, ListArchives(directory), KeptLogArchives);
             }
             catch
             {
             }
+        }
+
+        internal static List<FileInfo> ListArchives(string directory)
+        {
+            var found = new List<FileInfo>();
+            try
+            {
+                foreach (string path in Directory.GetFiles(directory, "macrando-*.log"))
+                {
+                    found.Add(new FileInfo(path));
+                }
+            }
+            catch
+            {
+            }
+            return found;
         }
 
         private static void Write(string level, string message, Exception error)

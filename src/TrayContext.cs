@@ -2259,6 +2259,10 @@ namespace MacRando
                     { "LICENSE", LicenseInfo.GetFullText() ?? LicenseInfo.Summary }
                 });
 
+                // A bundle is a few hundred kilobytes each, and this folder is never
+                // cleaned by anything else, so old ones are trimmed on the way out.
+                RetentionPolicy.Apply(directory, ListBundles(directory), RetentionPolicy.DefaultKeptBundles);
+
                 AppLogger.Info("Diagnostic bundle written to " + AppLogger.Sanitize(bundlePath));
                 _form.SetStatus("Diagnostic bundle saved.");
                 ShowNotification(
@@ -2299,6 +2303,22 @@ namespace MacRando
                     (entry.HasStructuredRetry ? "  |  retry=" + RetryKinds.Normalize(entry.RetryKind) : string.Empty));
             }
             return string.Join(Environment.NewLine, lines.ToArray());
+        }
+
+        private static List<System.IO.FileInfo> ListBundles(string directory)
+        {
+            var found = new List<System.IO.FileInfo>();
+            try
+            {
+                foreach (string path in Directory.GetFiles(directory, "MacRando-diagnostics-*.zip"))
+                {
+                    found.Add(new System.IO.FileInfo(path));
+                }
+            }
+            catch
+            {
+            }
+            return found;
         }
 
         private static void WriteBundle(string path, Dictionary<string, string> files)

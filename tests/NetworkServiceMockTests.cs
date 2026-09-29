@@ -228,6 +228,11 @@ internal static class NetworkServiceMockTests
             {
                 return deviceTrackingResult;
             }
+            int retentionResult = RetentionTests.Run();
+            if (retentionResult != 0)
+            {
+                return retentionResult;
+            }
             return 0;
         }
         catch (Exception error)
