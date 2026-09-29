@@ -20,6 +20,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history so `git rev-list` can resolve the tag being released.
+          fetch-depth: 0
 
       - name: Resolve version
         id: version
@@ -75,12 +78,29 @@ jobs:
           '@
           $notes = $notes.Replace('__VERSION__', $env:VERSION).Trim()
 
-          & gh release view $env:TAG --repo $env:GITHUB_REPOSITORY 2>&1 | Out-Null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release $env:TAG already exists; uploading the unsigned build to it."
-            & gh release upload $env:TAG $unsigned --repo $env:GITHUB_REPOSITORY --clobber 2>&1 |
-              ForEach-Object { Write-Host $_ }
-          } else {
+          # A release is stored under its tag, so deleting and re-pushing a tag can leave a
+          # stale release behind. If one exists but points at a different commit, replace it,
+          # otherwise the run would "succeed" while uploading to a release that is about to
+          # disappear.
+          $existingJson = & gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json tagName,targetCommitish 2>$null
+          $needsCreate = $true
+          if ($LASTEXITCODE -eq 0 -and $existingJson) {
+            $existingCommit = ''
+            & git rev-list -n 1 $env:TAG 2>$null | ForEach-Object { $existingCommit = $_.Trim() }
+            if ($existingCommit -and $existingCommit -eq $env:SHA) {
+              Write-Host "Release $env:TAG already points at $env:SHA; uploading the unsigned build to it."
+              & gh release upload $env:TAG $unsigned --repo $env:GITHUB_REPOSITORY --clobber 2>&1 |
+                ForEach-Object { Write-Host $_ }
+              $needsCreate = $false
+            }
+            else {
+              Write-Host "Release $env:TAG exists but points at '$existingCommit' rather than $env:SHA. Recreating it."
+              & gh release delete $env:TAG --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>&1 |
+                ForEach-Object { Write-Host $_ }
+            }
+          }
+
+          if ($needsCreate) {
             Write-Host "Creating release $env:TAG at $env:SHA"
             $ghArgs = @(
               'release', 'create', $env:TAG, $unsigned,
@@ -91,8 +111,14 @@ jobs:
               '--generate-notes'
             )
             & gh @ghArgs 2>&1 | ForEach-Object { Write-Host $_ }
+            if ($LASTEXITCODE -ne 0) {
+              throw "gh release create failed with exit code $LASTEXITCODE for tag $env:TAG"
+            }
+            # Confirm the release really exists; a silent no-op here would ship nothing.
+            & gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json tagName 2>&1 |
+              ForEach-Object { Write-Host $_ }
+            if ($LASTEXITCODE -ne 0) {
+              throw "Release $env:TAG was not created. Check that the workflow token has 'contents: write'."
+            }
+            Write-Host 'Release step completed.'
           }
-          if ($LASTEXITCODE -ne 0) {
-            throw "gh release step failed with exit code $LASTEXITCODE for tag $env:TAG"
-          }
-          Write-Host 'Release step completed.'
