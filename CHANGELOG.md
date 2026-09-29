@@ -1,5 +1,25 @@
 # MacRando Changelog
 
+## 1.6.0 - 2026.09
+
+### Added
+
+- **Inspect device tracking identifiers (read-only)**, a tray item that reports what Windows keeps on the machine that can be used to identify it, and what each item means. It changes nothing, and offers no way to change anything, which is the point: the identifiers are not switches, so nothing here honestly deserves a button.
+- The report covers the Global Device ID in both documented forms, the Microsoft account identity entries for the current account, the connected-devices token cache, the identity negative cache, the connected-devices data folder, the diagnostic data level, the customer experience program, the per-user advertising ID, and the machine GUID. Every read is independent, so one denied key costs that line rather than the whole report, and HKLM is read through the 64-bit view so the answer does not depend on whether the process started as 32-bit.
+- The diagnostic data level is interpreted against the Windows edition rather than merely repeated. `AllowTelemetry = 0` is honoured only on Enterprise, Education, and Server; on Pro and Home it is treated as `1`, so required data including hardware inventory, crash reports, and update status still leaves the machine. Editions outside the enterprise family are reported as still sending that floor, which is deliberately the pessimistic reading, because overstating what a setting achieves would be the worse error for a report whose purpose is to be believed.
+- The report is included in the diagnostic bundle as `device-tracking.txt`, with its two conclusions summarised in the bundle summary.
+- `GdidKind.Classify` distinguishes the 16-character hex local LID, the `g:`-prefixed global form, and anything else. A value that is present but not a documented shape is reported as unrecognized rather than guessed at, and the machine GUID is flagged as leave-alone with the reason, because it is a machine identity used for activation and DPAPI rather than a tracking handle.
+
+### Fixed
+
+- **The first version of the report inferred a Microsoft account state from a registry cache, and contradicted itself.** With no `g:` cache it said the absence was "consistent with not being signed in with a Microsoft account", one line after reporting that an account is signed in. The cache is populated by its own service, so its absence says nothing about account state. The report now states the absence and says explicitly that it is not evidence the machine is untracked, and the signed-in identity count is what answers the account question.
+- **A disabled advertising ID was reported as stored.** The check asked whether the key held any value, and the key holds the `Enabled` flag itself, so a machine with the advertising ID switched off reported a stored identifier. It now looks for the `AdvertisingId` value by name.
+
+### Tests
+
+- Sixty-two assertions covering identifier classification, including that free text, wrong lengths, and non-hex values are never treated as identifiers; that the identifier never appears in clear text in the rendered report or the bundle; that no account address is written out; and the edition table for the diagnostic data level, covering Enterprise, Server, Education, Professional, Home, Core, an unknown edition, an unset value, and an undocumented level.
+- One test pins the self-contradiction above directly, so a future reword of the same wrong inference fails the build.
+
 ## 1.5.0 - 2026.09
 
 ### Added

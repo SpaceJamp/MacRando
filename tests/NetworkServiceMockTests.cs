@@ -223,6 +223,11 @@ internal static class NetworkServiceMockTests
             {
                 return networkPresetResult;
             }
+            int deviceTrackingResult = DeviceTrackingTests.Run();
+            if (deviceTrackingResult != 0)
+            {
+                return deviceTrackingResult;
+            }
             return 0;
         }
         catch (Exception error)

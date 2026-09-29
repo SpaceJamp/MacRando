@@ -170,6 +170,28 @@ Anything it does change still goes through the normal backup, verification, and 
 
 **Startup is separate.** Binding a preset has no effect at launch. Startup randomization remains its own setting, and startup randomization still never runs while a restore profile is pending.
 
+## Device tracking identifiers
+
+**Inspect device tracking identifiers (read-only)** in the tray menu reports what Windows keeps on the machine that can be used to identify it, and what each item actually means. It changes nothing, and there is deliberately no way to change anything from it.
+
+The report covers:
+
+- the **Global Device ID**, in both documented forms: the plain 16-character hex local LID, and the `g:`-prefixed global form;
+- the **Microsoft account identity entries** for the current account, as a count only. No account address is written to the report, because the report is meant to be attachable to a bug report;
+- the connected-devices platform token cache, the identity negative cache, and the connected-devices data folder;
+- the **diagnostic data level** (`AllowTelemetry`), which location set it and which one wins, and what the value means *on this Windows edition*;
+- the customer experience program, the per-user advertising ID, and the machine GUID.
+
+Identifiers are masked. A value present but not in a documented shape is reported as unrecognized rather than guessed at.
+
+Three things the report tries hard not to let you get wrong:
+
+- **An identifier is a cache, not a switch.** The value on disk is what the platform fetched. Deleting it does not withdraw it, and it can be written back on the next connection to Microsoft, so a manual edit can look like it worked while doing nothing.
+- **`AllowTelemetry = 0` is not "off" on Pro or Home.** Microsoft treats it as `1` there, so required data, including hardware inventory, crash reports, and update status, still leaves the machine. Only Enterprise, Education, and Server honour it fully. The report says which case you are in rather than repeating the setting value.
+- **The machine GUID is not a telemetry handle.** It is a machine identity used for activation, user SID creation, and DPAPI, and regenerating it is a documented way to break activation. The report flags it as leave-alone.
+
+The report is also included in the diagnostic bundle as `device-tracking.txt`, and its two conclusions are summarised in the bundle summary.
+
 ## History and diagnostics
 
 **View IP change history** in the tray menu lists recent local-IP changes with the original and proposed address, prefix, DHCP state, gateway, and outcome: applied, verified, rolled back, or failed. Addresses are masked before they are written to disk, exactly like notification history.
@@ -333,6 +355,7 @@ Unless required by applicable law or agreed to in writing, the software is provi
 
 - `src/NetworkService.cs` — adapter discovery, Windows PowerShell commands, IP selection, VPN actions, and public-IP lookup.
 - `src/NetworkAutoApply.cs` — network identity and the pure decision logic for network-bound presets.
+- `src/DeviceTrackingService.cs` — read-only device tracking and diagnostic data inspection.
 - `src/TrayContext.cs` — tray menu and operation workflow.
 - `src/NotificationPopup.cs` — non-activating in-app notifications with the application icon.
 - `src/NotificationCenterForm.cs` — searchable notification history and notification preferences.

@@ -18,6 +18,7 @@ $sources = @(
     (Join-Path $root 'src\PowerShellRunner.cs'),
     (Join-Path $root 'src\PowerShellRunnerService.cs'),
     (Join-Path $root 'src\NetworkAutoApply.cs'),
+    (Join-Path $root 'src\DeviceTrackingService.cs'),
     (Join-Path $root 'src\NetworkService.cs'),
     (Join-Path $root 'src\AppLogger.cs'),
     (Join-Path $root 'src\StateStore.cs'),
@@ -32,7 +33,8 @@ $sources = @(
     (Join-Path $root 'tests\UpgradeRegressionTests.cs'),
     (Join-Path $root 'tests\ContrastTests.cs'),
     (Join-Path $root 'tests\ScriptValidationTests.cs'),
-    (Join-Path $root 'tests\NetworkPresetTests.cs')
+    (Join-Path $root 'tests\NetworkPresetTests.cs'),
+    (Join-Path $root 'tests\DeviceTrackingTests.cs')
 )
 $references = @(
     '/reference:System.dll',

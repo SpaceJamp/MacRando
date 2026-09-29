@@ -19,6 +19,7 @@ namespace MacRando
         private readonly NetworkService _network;
         private readonly StateStore _stateStore;
         private readonly DiagnosticsService _diagnostics;
+        private readonly DeviceTrackingService _deviceTracking;
         private readonly UpdateService _updateService;
         private readonly AppSettingsStore _settingsStore;
         private readonly AppSettings _settings;
@@ -38,6 +39,7 @@ namespace MacRando
         private readonly ToolStripMenuItem _refreshMenuItem;
         private readonly ToolStripMenuItem _diagnosticsMenuItem;
         private readonly ToolStripMenuItem _ipPreflightMenuItem;
+        private readonly ToolStripMenuItem _deviceTrackingMenuItem;
         private readonly ToolStripMenuItem _updateMenuItem;
         private readonly ToolStripMenuItem _notificationCenterMenuItem;
         private readonly ToolStripMenuItem _startMinimizedMenuItem;
@@ -95,6 +97,7 @@ namespace MacRando
                 AppLogger.Error("Initial restore-state load failed; persistence is temporarily disabled.", error);
             }
             _diagnostics = new DiagnosticsService(_network);
+            _deviceTracking = new DeviceTrackingService();
             _updateService = new UpdateService();
             _settingsStore = new AppSettingsStore();
             _settings = _settingsStore.Load();
@@ -114,6 +117,7 @@ namespace MacRando
             _refreshMenuItem = new ToolStripMenuItem("Refresh");
             _diagnosticsMenuItem = new ToolStripMenuItem("Run read-only diagnostics");
             _ipPreflightMenuItem = new ToolStripMenuItem("Run read-only IP preflight");
+            _deviceTrackingMenuItem = new ToolStripMenuItem("Inspect device tracking identifiers (read-only)");
             _updateMenuItem = new ToolStripMenuItem("Check for updates");
             _notificationCenterMenuItem = new ToolStripMenuItem("Notification center");
             _startMinimizedMenuItem = new ToolStripMenuItem("Start minimized to tray") { Checked = _settings.StartMinimized };
@@ -185,6 +189,7 @@ namespace MacRando
             _refreshMenuItem.Click += async (sender, args) => await SafeRefreshAsync();
             _diagnosticsMenuItem.Click += async (sender, args) => await RunDiagnosticsAsync();
             _ipPreflightMenuItem.Click += async (sender, args) => await RunIpPreflightAsync();
+            _deviceTrackingMenuItem.Click += async (sender, args) => await InspectDeviceTrackingAsync();
             _updateMenuItem.Click += async (sender, args) => await CheckForUpdatesAsync();
             _notificationCenterMenuItem.Click += (sender, args) => ShowNotificationCenter();
             _startMinimizedMenuItem.Click += (sender, args) => ToggleStartMinimized();
@@ -230,6 +235,7 @@ namespace MacRando
             _menu.Items.Add(_refreshMenuItem);
             _menu.Items.Add(_diagnosticsMenuItem);
             _menu.Items.Add(_ipPreflightMenuItem);
+            _menu.Items.Add(_deviceTrackingMenuItem);
             _menu.Items.Add(_updateMenuItem);
             _menu.Items.Add(_notificationCenterMenuItem);
             _restoreProblemMenuItem.Visible = _restoreStateUnreadable;
@@ -1006,6 +1012,52 @@ namespace MacRando
                 AppLogger.Error("Update install failed to start.", error);
                 SetBusy(false);
                 ShowError(error);
+            }
+        }
+
+        /// <summary>
+        /// Read-only. Reports what device tracking identifiers and diagnostic data settings
+        /// are on this machine and what they mean. It deliberately offers no way to change
+        /// any of it: the identifiers are not switches, so there is nothing here that
+        /// honestly deserves a button.
+        /// </summary>
+        private async Task InspectDeviceTrackingAsync()
+        {
+            if (_busy || _confirmationOpen)
+            {
+                return;
+            }
+
+            SetBusy(true);
+            _form.SetStatus("Inspecting device tracking identifiers...");
+            try
+            {
+                DeviceTrackingReport report = await Task.Run(() => _deviceTracking.Analyze(_deviceTracking.Read()));
+                string text = report.ToDisplayText();
+                AppLogger.Info("Read-only device tracking inspection completed. " +
+                    string.Join(" | ", report.Checks.ToArray()));
+                try
+                {
+                    File.WriteAllText(
+                        Path.Combine(_stateStore.DataDirectory, "device-tracking-latest.txt"),
+                        text,
+                        new UTF8Encoding(false));
+                }
+                catch
+                {
+                }
+                ShowReadOnlyReport("MacRando device tracking report", text);
+                _form.SetStatus("Device tracking inspection completed; nothing was changed.");
+            }
+            catch (Exception error)
+            {
+                AppLogger.Error("Read-only device tracking inspection failed.", error);
+                _form.SetStatus("Device tracking inspection failed: " + AppLogger.Sanitize(error.Message));
+                ShowError(error);
+            }
+            finally
+            {
+                SetBusy(false);
             }
         }
 
@@ -2112,7 +2164,25 @@ namespace MacRando
                 lines.Add("Notification history entries: " + (_state == null || _state.Notifications == null ? 0 : _state.Notifications.Count));
                 lines.Add("IP change history entries: " + (_state == null || _state.IpChangeHistory == null ? 0 : _state.IpChangeHistory.Count));
                 lines.Add("");
-                lines.Add("This bundle contains no MAC or IP addresses in clear text; values are masked.");
+                lines.Add("This bundle contains no MAC or IP addresses in clear text; values are masked. " +
+                    "Device tracking identifiers are masked as well, and no signed-in account address is included.");
+
+                // Read-only, and kept in the bundle because "is this machine identifiable"
+                // is otherwise unanswerable from a report.
+                string deviceTrackingText = "The device tracking inspection did not run for this bundle.";
+                try
+                {
+                    DeviceTrackingReport tracking = _deviceTracking.Analyze(_deviceTracking.Read());
+                    deviceTrackingText = tracking.ToDisplayText();
+                    lines.Add("Global Device ID: " + tracking.Headline);
+                    lines.Add("Diagnostic data level: " + tracking.TelemetryEffective);
+                }
+                catch (Exception trackingError)
+                {
+                    deviceTrackingText = "The device tracking inspection failed: " +
+                        AppLogger.Sanitize(trackingError.Message);
+                    lines.Add("Global Device ID: could not be inspected for this bundle.");
+                }
                 string summaryText = string.Join(Environment.NewLine, lines.ToArray());
 
                 string historyText = BuildNotificationHistoryExport();
@@ -2151,6 +2221,7 @@ namespace MacRando
                     { "restore-data-problem.txt", _restoreStateUnreadable ? _restoreStateProblemDetails : "No restore-data problem was recorded for this session." },
                     { "diagnostics.txt", diagnosticsText },
                     { "ip-preflight.txt", preflightText },
+                    { "device-tracking.txt", deviceTrackingText },
                     { "notification-history.txt", historyText },
                     { "ip-change-history.txt", string.Join(Environment.NewLine, ipHistory.ToArray()) },
                     { "macrando.log", logText },
@@ -2651,6 +2722,7 @@ namespace MacRando
             _refreshMenuItem.Enabled = !interactionBusy;
             _diagnosticsMenuItem.Enabled = !interactionBusy;
             _ipPreflightMenuItem.Enabled = !interactionBusy;
+            _deviceTrackingMenuItem.Enabled = !interactionBusy;
             _updateMenuItem.Enabled = !interactionBusy;
             if (_restoreAllMenuItem != null)
             {
