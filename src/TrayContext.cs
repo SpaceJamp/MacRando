@@ -32,6 +32,7 @@ namespace MacRando
         private readonly ToolStripMenuItem _statusMenuItem;
         private ToolStripMenuItem _versionMenuItem;
         private ToolStripMenuItem _restoreAllMenuItem;
+        private ToolStripMenuItem _restoreProblemMenuItem;
         private readonly ToolStripMenuItem _refreshMenuItem;
         private readonly ToolStripMenuItem _diagnosticsMenuItem;
         private readonly ToolStripMenuItem _ipPreflightMenuItem;
@@ -47,6 +48,8 @@ namespace MacRando
         private bool _startupRandomizeBlocked;
         private bool _startupRandomizeAttempted;
         private bool _stateLoadedSuccessfully;
+        private bool _restoreStateUnreadable;
+        private string _restoreStateProblemDetails;
         private AppState _state = new AppState();
         private string _publicIp = "Unavailable";
         private bool _busy;
@@ -69,6 +72,12 @@ namespace MacRando
             {
                 _state = _stateStore.Load();
                 _stateLoadedSuccessfully = true;
+            }
+            catch (RestoreStateUnreadableException error)
+            {
+                // The worst case this app has: a previous session may have left an adapter
+                // randomized and MacRando cannot find the profile that would put it back.
+                HandleUnreadableRestoreState(error);
             }
             catch (Exception error)
             {
@@ -182,6 +191,9 @@ namespace MacRando
             ToolStripMenuItem license = new ToolStripMenuItem("License (" + LicenseInfo.SpdxId + ")");
             license.Click += (sender, args) => ShowLicense();
 
+            _restoreProblemMenuItem = new ToolStripMenuItem("Restore data problem...");
+            _restoreProblemMenuItem.Click += (sender, args) => ShowRestoreStateProblem();
+
             _restoreAllMenuItem = new ToolStripMenuItem("Restore all pending profiles");
             _restoreAllMenuItem.Click += async (sender, args) => await RestoreAllPendingAsync();
             ToolStripMenuItem ipHistory = new ToolStripMenuItem("View IP change history");
@@ -208,6 +220,8 @@ namespace MacRando
             _menu.Items.Add(_ipPreflightMenuItem);
             _menu.Items.Add(_updateMenuItem);
             _menu.Items.Add(_notificationCenterMenuItem);
+            _restoreProblemMenuItem.Visible = _restoreStateUnreadable;
+            _menu.Items.Add(_restoreProblemMenuItem);
             _menu.Items.Add(stateFolder);
             _menu.Items.Add(logsFolder);
             _menu.Items.Add(new ToolStripSeparator());
@@ -303,7 +317,16 @@ namespace MacRando
             catch (Exception error)
             {
                 AppLogger.Error("Initial refresh failed.", error);
-                ShowError(error);
+                if (error is RestoreStateUnreadableException)
+                {
+                    // Already reported at startup with full guidance; do not repeat it as a
+                    // generic error every time the dashboard refreshes.
+                    AppLogger.Info("Initial refresh stopped because the restore data is unreadable.");
+                }
+                else
+                {
+                    ShowError(error);
+                }
             }
             finally
             {
@@ -422,6 +445,101 @@ namespace MacRando
         {
             int pending = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
             _form.SetPendingRestoreCount(pending);
+        }
+
+        /// <summary>
+        /// Records the incident to a plain-text file, blocks anything that could create a
+        /// restore profile MacRando cannot read back, and shows a persistent warning that
+        /// says what to do rather than only what happened.
+        /// </summary>
+        private void HandleUnreadableRestoreState(RestoreStateUnreadableException error)
+        {
+            _restoreStateUnreadable = true;
+            _restoreStateProblemDetails = BuildRestoreStateProblemText(error);
+
+            // Notification history lives inside the encrypted state, so it cannot be used
+            // here. Write a separate plain-text incident record next to the state files.
+            string incidentPath = Path.Combine(
+                _stateStore.DataDirectory,
+                "restore-data-problem-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".txt");
+            try
+            {
+                File.WriteAllText(incidentPath, _restoreStateProblemDetails, new UTF8Encoding(false));
+            }
+            catch
+            {
+            }
+
+            AppLogger.Error("Saved restore data is unreadable. Network changes are blocked until this is resolved.", error);
+            AppLogger.Info("Incident written to " + AppLogger.Sanitize(incidentPath));
+
+            _form.SetStatus("Restore data is unreadable. Network changes are blocked.");
+            _form.ShowDashboard();
+            _form.SetPendingRestoreCount(0);
+
+            ShowNotification(
+                "Restore data is unreadable - changes are blocked",
+                "MacRando cannot read its saved restore profiles, so it will not change any adapter until this is fixed. " +
+                "If an adapter is currently using a randomized MAC or IP address, reset it in Windows or restart the computer, " +
+                "because MacRando cannot restore it for you. The original files were left untouched.",
+                ToolTipIcon.Error);
+        }
+
+        private string BuildRestoreStateProblemText(RestoreStateUnreadableException error)
+        {
+            var lines = new List<string>();
+            lines.Add("MacRando restore-data problem");
+            lines.Add("Recorded (UTC): " + DateTime.UtcNow.ToString("o"));
+            lines.Add("Version: " + AppInfo.DisplayVersion);
+            lines.Add("");
+            lines.Add(error.BuildDetails());
+            lines.Add("");
+            lines.Add("What this means");
+            lines.Add("  MacRando could not read the encrypted file that holds your restore profiles.");
+            lines.Add("  Nothing was deleted, and the files on disk were not modified.");
+            lines.Add("  A previous session may have left an adapter changed. If so, MacRando cannot put it");
+            lines.Add("  back, because the saved profile is exactly what it cannot read.");
+            lines.Add("");
+            lines.Add("What to do");
+            lines.Add("  1. If an adapter is currently randomized, reset its MAC in Windows or restart the computer.");
+            lines.Add("  2. Do not delete the files in the folder below; they may be recoverable.");
+            lines.Add("  3. If the files are intact but MacRando still cannot read them, they were most likely");
+            lines.Add("     written by a different Windows user. Restore data is encrypted with DPAPI for the");
+            lines.Add("     user who created it and cannot be read by another account.");
+            lines.Add("  4. Use Export diagnostic bundle and attach the result if you report this.");
+            lines.Add("");
+            lines.Add("Folder: " + _stateStore.DataDirectory);
+            lines.Add("File : " + _stateStore.StatePath);
+            return string.Join(Environment.NewLine, lines.ToArray());
+        }
+
+        private void ShowRestoreStateProblem()
+        {
+            if (string.IsNullOrEmpty(_restoreStateProblemDetails))
+            {
+                ShowNotification(
+                    "Restore data is readable",
+                    "There is no restore-data problem recorded for this session.",
+                    ToolTipIcon.Info);
+                return;
+            }
+            ShowReadOnlyReport("MacRando restore-data problem", _restoreStateProblemDetails, "Copy details");
+        }
+
+        /// <summary>
+        /// Network changes are refused while the restore data cannot be read, because a
+        /// profile that cannot be read back is not a safety net.
+        /// </summary>
+        private bool IsNetworkChangeBlocked(out string reason)
+        {
+            if (_restoreStateUnreadable)
+            {
+                reason = "MacRando cannot read its saved restore data, so it will not change an adapter. " +
+                    "Open the restore-data problem details from the tray menu.";
+                return true;
+            }
+            reason = string.Empty;
+            return false;
         }
 
         private async Task RunDiagnosticsAsync()
@@ -989,6 +1107,13 @@ namespace MacRando
 
             if (!changeMac && !changeIp)
             {
+                return;
+            }
+
+            string blockedReason;
+            if (IsNetworkChangeBlocked(out blockedReason))
+            {
+                ShowError(new InvalidOperationException(blockedReason));
                 return;
             }
 
@@ -1679,6 +1804,10 @@ namespace MacRando
                 lines.Add("Version: " + AppInfo.DisplayVersion);
                 lines.Add("License: " + LicenseInfo.SpdxId);
                 lines.Add("Elevated: " + (IsElevated() ? "Yes" : "No"));
+                if (_restoreStateUnreadable)
+                {
+                    lines.Add("RESTORE DATA UNREADABLE: network changes are blocked for this session.");
+                }
                 lines.Add("Pending restore profiles: " + (_state == null || _state.Backups == null ? 0 : _state.Backups.Count));
                 lines.Add("Startup randomization enabled: " + (_settings.AutoRandomizeMacOnStartup ? "Yes" : "No"));
                 lines.Add("Notification history entries: " + (_state == null || _state.Notifications == null ? 0 : _state.Notifications.Count));
@@ -1720,6 +1849,7 @@ namespace MacRando
                 WriteBundle(bundlePath, new Dictionary<string, string>
                 {
                     { "summary.txt", summaryText },
+                    { "restore-data-problem.txt", _restoreStateUnreadable ? _restoreStateProblemDetails : "No restore-data problem was recorded for this session." },
                     { "diagnostics.txt", diagnosticsText },
                     { "ip-preflight.txt", preflightText },
                     { "notification-history.txt", historyText },

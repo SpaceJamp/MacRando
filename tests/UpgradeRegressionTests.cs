@@ -36,6 +36,9 @@ internal static class UpgradeRegressionChecks
             PreflightChangeLines();
             InstallGuardRefusesUnsafeCases();
             InstallGuardAllowsVerifiedNewerBuild();
+            CorruptRestoreStateRaisesTheSpecificError();
+            CorruptRestoreStateDetailsAreActionable();
+            ReadableRestoreStateDoesNotRaiseTheError();
             Console.WriteLine("upgrade-regression-tests=OK;checks=" + _checks);
             return 0;
         }
@@ -354,6 +357,104 @@ internal static class UpgradeRegressionChecks
                     PublishedUtc = source.Manifest.PublishedUtc
                 }
         };
+    }
+
+    private static void CorruptRestoreStateRaisesTheSpecificError()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MacRandoStateTest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            // Garbage where the encrypted state should be, and no usable backup.
+            File.WriteAllText(Path.Combine(root, "state.json"), "{ this is not valid json");
+            File.WriteAllText(Path.Combine(root, "state.json.bak"), "also not valid");
+
+            var store = new MacRando.StateStore(root);
+            bool raised = false;
+            try
+            {
+                store.Load();
+            }
+            catch (MacRando.RestoreStateUnreadableException error)
+            {
+                raised = true;
+                _checks++;
+                Check(error.Files.Count == 3,
+                    "the error should describe every candidate file, got " + error.Files.Count);
+                Check(error.InnerException != null, "the error should keep the underlying failure");
+            }
+            Check(raised, "an unreadable restore state must raise RestoreStateUnreadableException, " +
+                "so it can be reported loudly instead of as a generic error");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    private static void CorruptRestoreStateDetailsAreActionable()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MacRandoStateTest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "state.json"), "not json");
+            var store = new MacRando.StateStore(root);
+            try
+            {
+                store.Load();
+                Check(false, "expected an unreadable-state error");
+            }
+            catch (MacRando.RestoreStateUnreadableException error)
+            {
+                string details = error.BuildDetails();
+                Check(details.Contains("state.json"), "details should name the unreadable file");
+                Check(details.Contains("not present") || details.Contains("unreadable") || details.Contains(":"),
+                    "details should state the status of each file");
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    private static void ReadableRestoreStateDoesNotRaiseTheError()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MacRandoStateTest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var store = new MacRando.StateStore(root);
+            MacRando.AppState state = store.Load();
+            _checks++;
+            Check(state != null, "an absent state file should yield a fresh state, not an error");
+            Check(state.Backups != null && state.Backups.Count == 0, "a fresh state should have no backups");
+
+            // The backup copy is only created from the second save onward, because
+            // File.Replace needs an existing destination to move aside.
+            state.Backups["{guid}"] = new MacRando.AdapterBackup
+            {
+                AdapterKey = "{guid}",
+                AdapterName = "Ethernet",
+                InterfaceGuid = "{guid}",
+                MacChanged = true
+            };
+            store.Save(state);
+            store.Save(state);
+            Check(File.Exists(Path.Combine(root, "state.json.bak")),
+                "a second save should leave a backup copy behind");
+
+            File.WriteAllText(Path.Combine(root, "state.json"), "corrupt now");
+            MacRando.AppState recovered = store.Load();
+            _checks++;
+            Check(recovered.Backups.Count == 1,
+                "a corrupt primary file should fall back to the backup without raising an error");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
     }
 
     // The normalization helpers are private, so reach them the same way the store does.

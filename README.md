@@ -284,7 +284,19 @@ Restore profiles are stored per user at:
 %LOCALAPPDATA%\MacRando\state.json
 ```
 
-The state file and its backup are encrypted with Windows DPAPI for the current user. Legacy plaintext state files are migrated automatically on first load. A backup copy, `state.json.bak`, is kept when possible. The tray menu includes **Open restore-data folder**, **Open logs folder**, and **Run read-only diagnostics**.
+The state file and its backup are encrypted with Windows DPAPI for the current user. Legacy plaintext state files are migrated automatically on first load. A backup copy, `state.json.bak`, is kept when possible, and the newest readable copy is used automatically. The tray menu includes **Open restore-data folder**, **Open logs folder**, and **Run read-only diagnostics**.
+
+### If the restore data cannot be read
+
+This is the most serious thing that can go wrong, because a previous session may have left an adapter randomized and the saved profile is exactly what MacRando cannot read. When no restore-data file can be read:
+
+- A persistent notification explains what happened and what to do. Nothing is deleted, and the files on disk are not modified.
+- **Network changes are blocked.** A profile that cannot be read back is not a safety net, so MacRando will not touch an adapter until this is resolved.
+- The incident is written to `restore-data-problem-<timestamp>.txt` in the data folder, because notification history lives inside the encrypted state that could not be read.
+- **Restore data problem...** appears in the tray menu while the condition lasts, so the guidance stays reachable after the notification is dismissed.
+- The diagnostic bundle includes the report and flags the condition.
+
+If an adapter is currently randomized, reset its MAC in Windows or restart the computer, because MacRando cannot restore it for you. If the files are intact but still unreadable, they were most likely written by a different Windows user: DPAPI-encrypted data cannot be read by another account. Do not delete the files; they may be recoverable.
 
 The diagnostics report checks adapter discovery, the selected adapter's `NetworkAddress` support, IP/DHCP visibility, elevation, and VPN profile enumeration without changing adapter settings.
 

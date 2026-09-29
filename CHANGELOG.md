@@ -1,5 +1,27 @@
 # MacRando Changelog
 
+## 1.4.4 - 2026.09
+
+### Changed
+
+- **Unreadable restore data is now a loud, actionable failure instead of a generic error.** This is the worst failure MacRando can have, because a previous session may have left an adapter randomized and the saved profile is exactly what cannot be read. When no restore-data file can be read, MacRando now shows a persistent notification that says what happened, what it means, and what to do, including resetting a possibly randomized adapter in Windows or restarting the computer.
+- **Network changes are blocked while the restore data is unreadable.** A profile that cannot be read back is not a safety net, so MacRando will not change an adapter until the problem is resolved. The refusal explains why and points at the details.
+- The incident is recorded to a plain-text file next to the state, because notification history lives inside the encrypted state that could not be read. The original files are never modified or deleted.
+- The tray menu gains **Restore data problem...** while the problem is active, so the guidance stays reachable after the notification is dismissed.
+- The diagnostic bundle now includes the problem report and flags the condition in its summary, instead of reporting zero pending profiles and implying everything was fine.
+- Refreshing the dashboard no longer repeats the restore-data error as a generic message every time.
+
+### Added
+
+- `RestoreStateUnreadableException` with a per-file status list, so the error can explain which of `state.json`, `state.json.tmp`, and `state.json.bak` was present, readable, or corrupt, and why.
+
+### Tests
+
+- Twelve assertions covering the corrupt-restore-data path: the specific exception is raised rather than a generic one, every candidate file is described, the details are actionable, a fresh install with no state file is not treated as an error, and a corrupt primary file still falls back to the backup silently.
+- One test assumption was wrong and corrected: the backup copy only exists from the second save onward, because `File.Replace` needs an existing destination to move aside. The first save creates `state.json` only.
+
+## 1.4.3 - 2026.09
+
 ## 1.4.3 - 2026.09
 
 ### Fixed

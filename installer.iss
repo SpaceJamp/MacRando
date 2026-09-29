@@ -2,7 +2,7 @@
 ; Requires Inno Setup 6+ and a separately code-signed MacRando.exe.
 
 #define AppName "MacRando"
-#define AppVersion "1.4.3"
+#define AppVersion "1.4.4"
 #define AppExeName "MacRando.exe"
 
 [Setup]

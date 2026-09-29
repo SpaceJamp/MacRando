@@ -7,6 +7,63 @@ using System.Web.Script.Serialization;
 
 namespace MacRando
 {
+    /// <summary>
+    /// One saved restore-data file and why it could or could not be read.
+    /// </summary>
+    internal sealed class RestoreStateFileStatus
+    {
+        public string Path { get; set; }
+        public bool Exists { get; set; }
+        public bool Readable { get; set; }
+        public string Detail { get; set; }
+    }
+
+    /// <summary>
+    /// Raised when no saved restore-data file could be read at all. This is the most serious
+    /// failure MacRando can have, because a previous session may have left an adapter
+    /// randomized with no way to put it back, so it is handled separately from ordinary load
+    /// errors and is never reduced to a transient message.
+    /// </summary>
+    internal sealed class RestoreStateUnreadableException : Exception
+    {
+        public RestoreStateUnreadableException(string message, Exception inner, List<RestoreStateFileStatus> files)
+            : base(message, inner)
+        {
+            Files = files ?? new List<RestoreStateFileStatus>();
+        }
+
+        public List<RestoreStateFileStatus> Files { get; private set; }
+
+        public string BuildDetails()
+        {
+            var lines = new List<string>();
+            lines.Add(Message);
+            lines.Add("");
+            lines.Add("Saved restore-data files:");
+            foreach (RestoreStateFileStatus file in Files)
+            {
+                if (!file.Exists)
+                {
+                    lines.Add("  - " + file.Path + " : not present");
+                }
+                else if (file.Readable)
+                {
+                    lines.Add("  - " + file.Path + " : readable");
+                }
+                else
+                {
+                    lines.Add("  - " + file.Path + " : " + file.Detail);
+                }
+            }
+            if (InnerException != null)
+            {
+                lines.Add("");
+                lines.Add("First error: " + InnerException.Message);
+            }
+            return string.Join(Environment.NewLine, lines.ToArray());
+        }
+    }
+
     internal sealed class StateStore
     {
         private sealed class ProtectedStateEnvelope
@@ -61,10 +118,13 @@ namespace MacRando
                 bool bestNeedsMigration = false;
                 Exception firstError = null;
                 bool foundFile = false;
+                var statuses = new List<RestoreStateFileStatus>();
 
                 foreach (string candidate in candidates)
                 {
-                    if (!File.Exists(candidate))
+                    var status = new RestoreStateFileStatus { Path = candidate, Exists = File.Exists(candidate) };
+                    statuses.Add(status);
+                    if (!status.Exists)
                     {
                         continue;
                     }
@@ -74,6 +134,8 @@ namespace MacRando
                     {
                         bool needsMigration;
                         AppState candidateState = ReadState(candidate, out needsMigration);
+                        status.Readable = true;
+                        status.Detail = "readable";
                         DateTime writeTime = File.GetLastWriteTimeUtc(candidate);
                         if (bestState == null || writeTime > bestWriteTime)
                         {
@@ -85,6 +147,7 @@ namespace MacRando
                     }
                     catch (Exception error)
                     {
+                        status.Detail = error.GetType().Name + ": " + error.Message;
                         if (firstError == null)
                         {
                             firstError = error;
@@ -96,9 +159,13 @@ namespace MacRando
                 {
                     if (foundFile)
                     {
-                        throw new InvalidDataException(
-                            "MacRando could not read any valid saved restore data.",
-                            firstError);
+                        // A distinct exception type, because an unreadable restore profile is
+                        // the one failure that can leave an adapter changed with no way back.
+                        throw new RestoreStateUnreadableException(
+                            "MacRando could not read any valid saved restore data. " +
+                            "The files were left untouched.",
+                            firstError,
+                            statuses);
                     }
 
                     return new AppState();
