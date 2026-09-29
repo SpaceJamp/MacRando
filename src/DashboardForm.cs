@@ -1138,7 +1138,17 @@ namespace MacRando
             detailsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             detailsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             detailsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            detailsLayout.Controls.Add(page, 0, 0);
+
+            // A clipping scroll host keeps the cards from overlapping the Safety card.
+            var scrollHost = new Panel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+            scrollHost.Controls.Add(page);
+            detailsLayout.Controls.Add(scrollHost, 0, 0);
             safetyCard.Dock = DockStyle.Top;
             safetyCard.Margin = Padding.Empty;
             detailsLayout.Controls.Add(safetyCard, 0, 1);
@@ -1673,15 +1683,18 @@ namespace MacRando
 
         private static TableLayoutPanel CreatePageLayout()
         {
+            // The page lives inside a scroll host. AutoScroll on a TableLayoutPanel does not
+            // clip its children, so without the host the cards below simply draw on top of
+            // the Safety and status card on a short window.
             var page = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
                 ColumnCount = 1,
                 RowCount = 0,
-                Padding = new Padding(0, 0, 0, 12),
-                AutoScroll = true,
-                AutoSize = false,
-                GrowStyle = TableLayoutPanelGrowStyle.FixedSize
+                Padding = new Padding(0, 0, 12, 12),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                GrowStyle = TableLayoutPanelGrowStyle.AddRows
             };
             page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             return page;
