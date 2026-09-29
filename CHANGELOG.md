@@ -1,5 +1,16 @@
 # MacRando Changelog
 
+## 1.4.1 - 2026.09
+
+### Changed
+
+- **Check for updates is now a single command.** It checks the manifest, downloads the release, verifies the SHA-256 and the Authenticode signer, and installs and restarts, with no intermediate step for the user to click through. Previously it stopped at a report with an *Install and restart* button.
+- The redundant **Install update and restart** tray item was removed, because it did the same work as the update check.
+- When there is nothing to install, the result is a notification rather than a modal report window. A report window is still shown when the updater is unconfigured, or when a verified download cannot be installed yet, because those cases need an explanation the user can act on.
+- Installing still asks for confirmation once, because it closes MacRando and replaces the executable. Everything up to that point is automatic.
+
+## 1.4.0 - 2026.09
+
 ## 1.4.0 - 2026.09
 
 ### Added

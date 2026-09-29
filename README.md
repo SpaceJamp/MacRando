@@ -187,7 +187,11 @@ The tray menu includes **Check for updates**. Configure an HTTPS update manifest
 
 ### Installing an update
 
-When a newer build has been downloaded and verified, the update report offers **Install and restart**, and the tray has an **Install update and restart** shortcut that checks and installs in one step.
+**Check for updates** is a single command. It fetches the manifest, downloads a newer release, verifies its SHA-256 hash and Authenticode signer, and then installs and restarts. There is no intermediate step.
+
+If there is nothing to install, you get a notification. If a verified download cannot be installed yet, for example because an adapter restore profile is still pending, the report window explains why.
+
+Installing asks for confirmation once, because it closes MacRando and replaces the executable. Everything up to that point is automatic.
 
 A running executable cannot overwrite its own image, so MacRando hands the work to a short-lived helper process that:
 
