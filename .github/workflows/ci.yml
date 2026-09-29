@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show environment
+        shell: powershell
+        run: |
+          Write-Host "PowerShell $($PSVersionTable.PSVersion)"
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (-not (Test-Path $csc)) { throw '.NET Framework C# compiler not found' }
+          Write-Host "Compiler: $csc"
+
+      - name: Run mock and settings tests
+        shell: powershell
+        run: .\test.ps1
+
+      - name: Build
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Verify app manifest and version
+        shell: powershell
+        run: |
+          $exe = '.\bin\MacRando.exe'
+          if (-not (Test-Path $exe)) { throw 'Build output missing' }
+          $info = (Get-Item $exe).VersionInfo
+          Write-Host "File version:    $($info.FileVersion)"
+          Write-Host "Product version: $($info.ProductVersion)"
+          $requestedAsLow = (Select-String -Path '.\src\AssemblyInfo.cs' -Pattern 'AssemblyFileVersion\("([\d\.]+)"\)').Matches[0].Groups[1].Value
+          if ($info.FileVersion -ne $requestedAsLow) {
+            throw "Version mismatch: binary $($info.FileVersion) vs source $requestedAsLow"
+          }
+
+      - name: Upload unsigned build
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacRando-unsigned
+          path: |
+            bin/MacRando.exe
+            bin/*.ico
+          retention-days: 7
+          if-no-files-found: error

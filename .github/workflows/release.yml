@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (for example 1.2.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Test, build, and stage release
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: powershell
+        run: |
+          $version = '${{ github.event.inputs.version }}'
+          if ([string]::IsNullOrWhiteSpace($version)) { $version = '${{ github.ref_name }}'.TrimStart('v') }
+          if ([string]::IsNullOrWhiteSpace($version)) { throw 'Could not determine the release version' }
+          "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "tag=v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Version: $version"
+
+      - name: Run tests
+        shell: powershell
+        run: .\test.ps1
+
+      - name: Build and package (unsigned)
+        shell: powershell
+        run: .\package.ps1 -Version "${{ steps.version.outputs.value }}"
+
+      - name: Create release and attach unsigned build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          $notes = @"
+          Automated build for MacRando $VERSION.
+
+          The attached archive is **unsigned**. GitHub-hosted runners do not have the
+          MacRando Development signing certificate, so the signed release artifacts are
+          produced on the maintainer's machine:
+
+          ```
+          .\package.ps1 -SignThumbprint 8804295F8D8615DC1D137720847672ABA1342FEC
+          .\publish-update.ps1 -Version $VERSION -Repository SpaceJamp/MacRando
+          ```
+
+          Upload the signed ``MacRando-$VERSION.zip`` and ``update.json`` to this release to
+          activate the in-app **Check for updates** feature.
+          "@
+          $signed   = "dist\MacRando-$VERSION.zip"
+          $unsigned = "dist\MacRando-$VERSION-unsigned.zip"
+          Copy-Item $signed $unsigned -Force
+          $ghArgs = @('release', 'create', $TAG, $unsigned,
+                      '--repo', $env:GITHUB_REPOSITORY,
+                      '--title', "MacRando $VERSION",
+                      '--notes', $notes)
+          & gh @ghArgs
+          if ($LASTEXITCODE -ne 0) {
+            & gh release upload $TAG $unsigned --repo $env:GITHUB_REPOSITORY --clobber
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed with exit code $LASTEXITCODE" }
+          }
