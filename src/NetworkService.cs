@@ -92,15 +92,33 @@ Write-MacRandoJson64 ([pscustomobject]@{
 
         private const string AdapterScript = @"
 $items = @()
-foreach ($adapter in @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object { $_.InterfaceGuid -and -not $_.Virtual })) {
+# All adapters, not just -Physical: an unflagged virtual machine host adapter or tunnel
+# is exactly the case that needs classifying, and filtering it out here would hide it
+# instead of labelling it. MacRando decides what is safe to change, in C#, from the
+# driver strings and the media type read below.
+#
+# The NetworkAddress lookup is hoisted out of the loop below, and that is the change that
+# actually made a refresh fast. Get-NetAdapterAdvancedProperty -AllProperties enumerates
+# the advanced properties of every adapter on the machine, so asking for it once per
+# adapter re-scanned the whole set N times to pick out one row per adapter. It was by far
+# the most expensive query in a refresh. Keyed on the GUID prefix the InstanceID uses, so
+# the per-adapter lookup is now a hashtable hit.
+$macPropertiesByPrefix = @{}
+foreach ($property in @(Get-NetAdapterAdvancedProperty -AllProperties -ErrorAction SilentlyContinue |
+    Where-Object { $_.RegistryKeyword -eq 'NetworkAddress' })) {
+  $instance = [string]$property.InstanceID
+  if ([string]::IsNullOrWhiteSpace($instance)) { continue }
+  $separator = $instance.IndexOf('::')
+  if ($separator -le 0) { continue }
+  $macPropertiesByPrefix[$instance.Substring(0, $separator + 2)] = $property
+}
+
+foreach ($adapter in @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.InterfaceGuid })) {
   $ipAddress = ''
   $prefixLength = 0
   $dhcpEnabled = $false
   $adapterPrefix = ([string]$adapter.InterfaceGuid) + '::'
-  $macProperty = @(Get-NetAdapterAdvancedProperty -AllProperties -ErrorAction SilentlyContinue | Where-Object {
-    $_.RegistryKeyword -eq 'NetworkAddress' -and
-    ([string]$_.InstanceID).StartsWith($adapterPrefix, [System.StringComparison]::OrdinalIgnoreCase)
-  })[0]
+  $macProperty = $macPropertiesByPrefix[$adapterPrefix]
   try {
     $configuration = Get-NetIPConfiguration -InterfaceIndex $adapter.InterfaceIndex -ErrorAction Stop
     $address = @(Get-NetIPAddress -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv4 -ErrorAction Stop |
@@ -131,6 +149,13 @@ foreach ($adapter in @(Get-NetAdapter -Physical -ErrorAction Stop | Where-Object
     IpAddress = $ipAddress
     PrefixLength = $prefixLength
     DhcpEnabled = $dhcpEnabled
+    # Read-only extras. The filter above already drops adapters Windows flags as virtual,
+    # but a virtual machine host adapter or a third-party tunnel registers a real NDIS
+    # miniport and is not flagged at all, so it reaches this list looking like hardware.
+    # MediaType and PhysicalMediaType come from the driver and cost nothing to read.
+    MediaType = [string]$adapter.MediaType
+    NdisPhysicalMedium = [int]$adapter.NdisPhysicalMedium
+    HardwareInterface = [bool]$adapter.HardwareInterface
   }
 }
 Write-MacRandoJson64 -Value @($items)
@@ -571,6 +596,93 @@ foreach ($profile in $allProfiles) {
 Write-MacRandoJson64 -Value @($unique.Values)
 ";
 
+        /// <summary>
+        /// One script returning both the adapter list and the VPN profile list.
+        ///
+        /// Identical in what it queries to <see cref="AdapterScript"/> and
+        /// <see cref="VpnListScript"/>, which remain for the paths that need one list on
+        /// its own. Kept as a separate literal rather than assembled from the other two
+        /// because PowerShell here is a verbatim string: the body has to read as a script
+        /// on its own for anyone reading this file, and the tests run the real thing
+        /// against a live machine.
+        ///
+        /// The two halves are independent, so neither depends on the other having
+        /// succeeded. A machine with no VPN profiles, or a cmdlet missing entirely, still
+        /// gets a full adapter list back rather than a failed refresh.
+        /// </summary>
+        private const string SnapshotScript = @"
+$items = @()
+$macPropertiesByPrefix = @{}
+foreach ($property in @(Get-NetAdapterAdvancedProperty -AllProperties -ErrorAction SilentlyContinue |
+    Where-Object { $_.RegistryKeyword -eq 'NetworkAddress' })) {
+  $instance = [string]$property.InstanceID
+  if ([string]::IsNullOrWhiteSpace($instance)) { continue }
+  $separator = $instance.IndexOf('::')
+  if ($separator -le 0) { continue }
+  $macPropertiesByPrefix[$instance.Substring(0, $separator + 2)] = $property
+}
+foreach ($adapter in @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.InterfaceGuid })) {
+  $ipAddress = ''
+  $prefixLength = 0
+  $dhcpEnabled = $false
+  $adapterPrefix = ([string]$adapter.InterfaceGuid) + '::'
+  $macProperty = $macPropertiesByPrefix[$adapterPrefix]
+  try {
+    $configuration = Get-NetIPConfiguration -InterfaceIndex $adapter.InterfaceIndex -ErrorAction Stop
+    $address = @(Get-NetIPAddress -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv4 -ErrorAction Stop |
+      Where-Object { $_.AddressState -eq 'Preferred' -and $_.IPAddress -and $_.IPAddress -notlike '169.254.*' } |
+      Select-Object -First 1)[0]
+    if ($null -ne $address) {
+      $ipAddress = [string]$address.IPAddress
+      $prefixLength = [int]$address.PrefixLength
+    }
+    $interface = @(Get-NetIPInterface -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue)[0]
+    if ($null -ne $interface) {
+      $dhcpEnabled = ([string]$interface.Dhcp -eq 'Enabled')
+    }
+  } catch {
+    # A connected adapter may briefly have no IPv4 configuration.
+  }
+  $items += [pscustomobject]@{
+    Name = [string]$adapter.Name
+    Description = [string]$adapter.InterfaceDescription
+    InterfaceIndex = [int]$adapter.InterfaceIndex
+    MacAddress = [string]$adapter.MacAddress
+    PermanentMacAddress = [string]$adapter.PermanentAddress
+    MacPropertySupported = ($null -ne $macProperty)
+    LinkSpeed = [string]$adapter.LinkSpeed
+    InterfaceGuid = [string]$adapter.InterfaceGuid
+    Status = [string]$adapter.Status
+    IsUp = ([string]$adapter.Status -eq 'Up')
+    IpAddress = $ipAddress
+    PrefixLength = $prefixLength
+    DhcpEnabled = $dhcpEnabled
+    MediaType = [string]$adapter.MediaType
+    NdisPhysicalMedium = [int]$adapter.NdisPhysicalMedium
+    HardwareInterface = [bool]$adapter.HardwareInterface
+  }
+}
+
+$vpnProfiles = @()
+try { $vpnProfiles += @(Get-VpnConnection -ErrorAction SilentlyContinue) } catch { }
+try { $vpnProfiles += @(Get-VpnConnection -AllUserConnection -ErrorAction SilentlyContinue) } catch { }
+$unique = @{}
+foreach ($profile in $vpnProfiles) {
+  if ($null -eq $profile -or [string]::IsNullOrWhiteSpace([string]$profile.Name)) { continue }
+  $unique[[string]$profile.Name] = [pscustomobject]@{
+    Name = [string]$profile.Name
+    ServerAddress = [string]$profile.ServerAddress
+    TunnelType = [string]$profile.TunnelType
+    SplitTunneling = [bool]$profile.SplitTunneling
+  }
+}
+
+Write-MacRandoJson64 -Value ([pscustomobject]@{
+  Adapters = @($items)
+  VpnProfiles = @($unique.Values)
+})
+";
+
         private const string VpnActionScript = @"
 $arguments = @($env:MR_VPN_NAME)
 if ($env:MR_VPN_DISCONNECT -eq '1') { $arguments += '/disconnect' }
@@ -587,6 +699,36 @@ if ($code -ne 0) {
         {
             return _runner.RunJsonAsync<List<AdapterInfo>>(
                 AdapterScript, null, PowerShellTimeoutMilliseconds);
+        }
+
+        /// <summary>
+        /// Everything a refresh needs that Windows will only answer by running a script.
+        ///
+        /// The adapter list and the VPN profile list were two sequential process launches,
+        /// each paying the full cost of starting PowerShell and loading the networking
+        /// cmdlets before it can answer a question. They are independent, so one script
+        /// returning both halves the launches per refresh. Public IP is deliberately not
+        /// here: that is an HTTP call, and folding it in would make a dashboard refresh
+        /// wait on a third-party service.
+        ///
+        /// Split out as a type so the payload stays a contract that can be asserted, and
+        /// so a field added to one list without the other is a compile error rather than a
+        /// silently empty half of the dashboard.
+        /// </summary>
+        public async Task<NetworkSnapshot> GetSnapshotAsync()
+        {
+            var raw = await _runner.RunJsonAsync<NetworkSnapshotRaw>(
+                SnapshotScript, null, PowerShellTimeoutMilliseconds);
+            if (raw == null)
+            {
+                throw new InvalidOperationException("Windows returned no network snapshot.");
+            }
+
+            return new NetworkSnapshot
+            {
+                Adapters = raw.Adapters ?? new List<AdapterInfo>(),
+                VpnProfiles = raw.VpnProfiles ?? new List<VpnProfile>()
+            };
         }
 
         public Task<NetworkState> GetStateAsync(AdapterInfo adapter)

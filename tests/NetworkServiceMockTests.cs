@@ -253,6 +253,11 @@ internal static class NetworkServiceMockTests
             {
                 return keepChangeResult;
             }
+            int adapterKindResult = AdapterKindTests.Run();
+            if (adapterKindResult != 0)
+            {
+                return adapterKindResult;
+            }
             return 0;
         }
         catch (Exception error)

@@ -20,6 +20,34 @@ namespace MacRando
         public string IpAddress { get; set; }
         public int PrefixLength { get; set; }
         public bool DhcpEnabled { get; set; }
+        /// <summary>Media type reported by the driver, when it reports one.</summary>
+        public string MediaType { get; set; }
+        /// <summary>
+        /// NdisPhysicalMedium. This is what separates a real wired NIC from a tunnel:
+        /// a tunnel driver reports "802.3" like a NIC does, but its description does not
+        /// look like hardware, so the two are read together rather than either alone.
+        /// </summary>
+        public int NdisPhysicalMedium { get; set; }
+        /// <summary>False for adapters Windows already knows are not backed by hardware.</summary>
+        public bool HardwareInterface { get; set; }
+
+        /// <summary>What this adapter is, from the driver strings and the media type.</summary>
+        public AdapterKind Kind
+        {
+            get { return AdapterClassification.Classify(Name, Description); }
+        }
+
+        /// <summary>Whether MacRando will change this adapter.</summary>
+        public bool IsChangeable
+        {
+            get { return AdapterClassification.IsChangeable(Kind); }
+        }
+
+        /// <summary>Why the adapter is off limits, or empty if it is not off limits.</summary>
+        public string Restriction
+        {
+            get { return AdapterClassification.DescribeRestriction(Kind); }
+        }
 
         public string Key
         {
@@ -143,9 +171,30 @@ namespace MacRando
     internal static class AppInfo
     {
         public const string ProductName = "MacRando";
-        public const string Version = "1.13.2";
+        public const string Version = "1.14.0";
         public const string BuildLabel = "2026.09";
         public static string DisplayVersion { get { return Version + " (" + BuildLabel + ")"; } }
+    }
+
+    /// <summary>
+    /// Shape of the combined network snapshot returned by one PowerShell run.
+    ///
+    /// Separate from <see cref="NetworkSnapshot"/> so the deserialized payload mirrors
+    /// what the script emits and the C# side can normalize afterwards.
+    /// </summary>
+    internal sealed class NetworkSnapshotRaw
+    {
+        public List<AdapterInfo> Adapters { get; set; }
+        public List<VpnProfile> VpnProfiles { get; set; }
+    }
+
+    /// <summary>
+    /// Everything a dashboard refresh needs from one PowerShell run.
+    /// </summary>
+    internal sealed class NetworkSnapshot
+    {
+        public List<AdapterInfo> Adapters { get; set; }
+        public List<VpnProfile> VpnProfiles { get; set; }
     }
 
     internal sealed class AdapterPreset

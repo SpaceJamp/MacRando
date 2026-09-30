@@ -1,5 +1,23 @@
 # MacRando Changelog
 
+## 1.14.0 - 2026.09
+
+### Added
+
+- **Virtual machine and tunnel adapters are recognised and left alone.** The adapter list used to filter with `Get-NetAdapter -Physical and not .Virtual`, which drops most virtual adapters but misses the ones that matter: a Hyper-V, VMware or VirtualBox host adapter, and a third-party tunnel such as WireGuard, Cloudflare WARP or Tailscale, all register a genuine NDIS miniport and are not flagged at all. They arrived in the list looking exactly like hardware, and randomising one either does nothing useful or disrupts something MacRando does not own and cannot put right.
+
+  Adapters are now classified as physical, virtual machine, tunnel or other virtual, from the driver strings and the media type. Nothing is hidden: an off-limits adapter stays in the list, labelled and greyed, with the reason in its tooltip and in the detail pane. An adapter that silently disappears gives a user no way to tell it was excluded on purpose or why.
+
+  The refusal is enforced at the point of change rather than only in the interface, because the network-change watcher has no interface to disable. A preset records an adapter key, and that key can later belong to a tunnel after a driver change or a re-enumeration, so auto-apply now checks and skips with a logged reason. Restoration is deliberately not blocked: MacRando must always be able to put back something it changed.
+
+- **The query-only PowerShell scripts are now run for real by the test suite.** They were only ever checked as text, which cannot catch a syntax error. `Get-NetAdapter` runs live on the machine and its payload must parse and name every adapter; the per-adapter scripts, which refuse to run without a GUID, are parse-checked with PowerShell's own parser instead. The adapter listing and the combined snapshot are then compared, and they must report the same adapter count. Checked because these scripts run at startup, so a mistake in one means the app shows no adapters on every machine.
+
+### Changed
+
+- **One PowerShell launch per refresh instead of two.** The adapter list and the VPN profile list were two sequential process launches for two independent questions. Folding them into one script halves the process starts, and the public IP is still fetched on its own so a dashboard refresh does not wait on a third-party service. If the combined call fails, the refresh falls back to the two separate calls rather than losing the adapter list, so an unanswerable VPN query cannot cost the user their adapters. Measured on this machine: about 150ms saved per refresh, with a test that fails if it ever becomes a regression.
+
+- **The NetworkAddress lookup is hoisted out of the per-adapter loop.** `Get-NetAdapterAdvancedProperty -AllProperties` enumerates the advanced properties of every adapter on the machine, and it was being called once per adapter, re-scanning the whole set N times to pick out a single row. It is now called once and keyed by interface prefix. This was the most expensive query in a refresh.
+
 ## 1.13.2 - 2026.09
 
 ### Fixed

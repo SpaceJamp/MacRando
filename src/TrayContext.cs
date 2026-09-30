@@ -454,6 +454,19 @@ namespace MacRando
                 return;
             }
 
+            // Checked before anything else is attempted, and here specifically because
+            // nothing in the user interface is involved on this path. A preset records an
+            // adapter key, and that key can later belong to a tunnel or a virtual machine
+            // host adapter, for instance after a driver change or a re-enumeration. There
+            // is no disabled button to stop it, so this is the only thing that does.
+            if (!DashboardForm.CanAutoApplyTo(target))
+            {
+                SkipBoundPreset(preset, target.IsChangeable
+                    ? "its adapter is not connected"
+                    : "its adapter is now a " + AdapterClassification.DescribeKind(target.Kind) + " adapter");
+                return;
+            }
+
             bool changeMac = preset.RandomizeMac;
             bool changeIp = preset.RandomizeIp;
             if (changeMac && !target.MacPropertySupported)
@@ -1337,18 +1350,54 @@ namespace MacRando
             _stateLoadedSuccessfully = true;
             _startupRandomizeBlocked = loadedState.PendingOperation != null;
             RefreshNotificationCenter();
-            List<AdapterInfo> adapters = await _network.GetAdaptersAsync();
-            List<VpnProfile> vpnProfiles;
+            // One PowerShell run for both lists. They were two sequential launches, each
+            // paying the full cost of starting PowerShell and loading the networking
+            // cmdlets, for two questions that do not depend on each other. The public IP
+            // is still fetched on its own: folding that in would make a dashboard refresh
+            // wait on a third-party service.
+            NetworkSnapshot snapshot = null;
             bool vpnRefreshFailed = false;
             try
             {
-                vpnProfiles = await _network.GetVpnProfilesAsync() ?? new List<VpnProfile>();
+                snapshot = await _network.GetSnapshotAsync();
             }
             catch
             {
+                // Deliberately not awaited in here: C# forbids an await in a catch body, and
+                // the fallback is a genuine recovery path rather than something to fold
+                // into the same expression. Run on without a snapshot, then fill the gap.
                 vpnRefreshFailed = true;
-                vpnProfiles = new List<VpnProfile>(_vpnProfiles ?? new List<VpnProfile>());
             }
+
+            if (snapshot == null)
+            {
+                // A combined call failing does not mean the adapter list is gone, so fall
+                // back to the single-list call. Otherwise a VPN query that cannot be
+                // answered would cost the user their adapters as well.
+                List<AdapterInfo> fallbackAdapters;
+                try
+                {
+                    fallbackAdapters = await _network.GetAdaptersAsync();
+                }
+                catch
+                {
+                    throw;
+                }
+                List<VpnProfile> fallbackVpn;
+                try
+                {
+                    fallbackVpn = await _network.GetVpnProfilesAsync() ?? new List<VpnProfile>();
+                    vpnRefreshFailed = false;
+                }
+                catch
+                {
+                    fallbackVpn = new List<VpnProfile>(_vpnProfiles ?? new List<VpnProfile>());
+                }
+                snapshot = new NetworkSnapshot { Adapters = fallbackAdapters, VpnProfiles = fallbackVpn };
+            }
+
+            List<AdapterInfo> adapters = snapshot.Adapters ?? new List<AdapterInfo>();
+            List<VpnProfile> vpnProfiles = snapshot.VpnProfiles ?? new List<VpnProfile>();
 
             string publicIp = "Unavailable";
             if (refreshPublicIp)
@@ -1709,6 +1758,17 @@ namespace MacRando
                     throw new NotSupportedException(
                         "This adapter does not expose a configurable Network Address property. " +
                         "Use Windows' built-in Wi-Fi/MAC randomization settings or choose another adapter.");
+                }
+
+                // Enforced here, at the point of change, rather than only in the UI. The
+                // adapter list is the same AdapterInfo objects, so a stale selection or a
+                // preset that named this adapter months ago arrives here too and is
+                // refused for the same reason. Auto-apply is the case that matters: a
+                // preset armed on a network must not quietly rewrite a tunnel adapter.
+                if (!adapter.IsChangeable)
+                {
+                    throw new NotSupportedException(
+                        adapter.Restriction + " MacRando will not change it.");
                 }
 
                 if (changeIp)
@@ -3255,6 +3315,12 @@ namespace MacRando
             if (!preset.RandomizeMac && !preset.RandomizeIp)
             {
                 ShowError(new InvalidOperationException("This preset has no enabled network action."));
+                return;
+            }
+            if (!adapter.IsChangeable)
+            {
+                ShowError(new NotSupportedException(
+                    adapter.Restriction + " MacRando will not change it, and a preset cannot override that."));
                 return;
             }
 

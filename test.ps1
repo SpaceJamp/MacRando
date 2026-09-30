@@ -45,7 +45,9 @@ $sources = @(
     (Join-Path $root 'src\UpdateTrust.cs'),
     (Join-Path $root 'tests\UpdateTrustTests.cs'),
     (Join-Path $root 'src\KeepChangePolicy.cs'),
-    (Join-Path $root 'tests\KeepChangeTests.cs')
+    (Join-Path $root 'tests\KeepChangeTests.cs'),
+    (Join-Path $root 'src\AdapterKind.cs'),
+    (Join-Path $root 'tests\AdapterKindTests.cs')
 )
 $references = @(
     '/reference:System.dll',
@@ -65,6 +67,14 @@ if ($LASTEXITCODE -ne 0) {
 & $output
 if ($LASTEXITCODE -ne 0) {
     throw "Mock tests failed with exit code $LASTEXITCODE."
+}
+
+# The combined network snapshot is timed against the two-launch path it replaced, so the
+# change that halves the process launches per refresh cannot silently become a regression.
+# Read-only: every variant only queries.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tests\SnapshotTiming.ps1')
+if ($LASTEXITCODE -ne 0) {
+    throw "Snapshot timing test failed with exit code $LASTEXITCODE."
 }
 
 # The update install helper is exercised end to end against a stub executable:

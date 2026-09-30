@@ -65,7 +65,7 @@ internal static class ExtractHelper
         /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll `
         /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll `
         (Join-Path $root 'src\Models.cs') (Join-Path $root 'src\RetentionPolicy.cs') (Join-Path $root 'src\AppLogger.cs') `
-        (Join-Path $root 'src\UpdateInstaller.cs') $extractor
+        (Join-Path $root 'src\AdapterKind.cs') (Join-Path $root 'src\UpdateInstaller.cs') $extractor
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the helper script extractor.' }
 
     $scriptPath = Join-Path $work 'helper.ps1'

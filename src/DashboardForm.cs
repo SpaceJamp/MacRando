@@ -181,6 +181,11 @@ namespace MacRando
         private Color _listInputColor;
         private Color _listHeaderColor;
         private Color _listTextColor;
+        /// <summary>
+        /// Secondary colour for adapter rows MacRando will not change, so an off-limits
+        /// adapter is visibly off limits in the list rather than only in its tooltip.
+        /// </summary>
+        private Color _listMutedColor;
         private Color _listSelectedColor;
         private Color _listSelectedTextColor;
         private string _displayedAdapterKey;
@@ -1238,10 +1243,17 @@ namespace MacRando
                     {
                         foreach (AdapterInfo adapter in adapters)
                         {
-                            ListViewItem item = new ListViewItem((IsFavorite(adapter.Key) ? "★ " : string.Empty) + (adapter.Name ?? "Unknown adapter"));
+                            // The kind is shown in the list rather than the adapter being
+                            // hidden, because a missing adapter gives a user no way to tell
+                            // that it was deliberately excluded or why.
+                            string kindLabel = AdapterClassification.DescribeKind(adapter.Kind);
+                            ListViewItem item = new ListViewItem(
+                                (IsFavorite(adapter.Key) ? "★ " : string.Empty) + (adapter.Name ?? "Unknown adapter") +
+                                (adapter.IsChangeable ? string.Empty : "  [" + kindLabel + "]"));
                             item.SubItems.Add(string.IsNullOrWhiteSpace(adapter.Status) ? "Unknown" : adapter.Status);
                             item.SubItems.Add(string.IsNullOrWhiteSpace(adapter.IpAddress) ? "—" : adapter.IpAddress);
-                            item.ToolTipText = adapter.ToString() + "  •  " + (string.IsNullOrWhiteSpace(adapter.IpAddress) ? "No IPv4" : adapter.IpAddress);
+                            item.ToolTipText = adapter.ToString() + "  •  " + (string.IsNullOrWhiteSpace(adapter.IpAddress) ? "No IPv4" : adapter.IpAddress) +
+                                (adapter.IsChangeable ? string.Empty : "  •  " + adapter.Restriction);
                             item.Tag = adapter;
                             _adapterList.Items.Add(item);
                             if (firstUpItem == null && adapter.IsUp)
@@ -1503,7 +1515,16 @@ namespace MacRando
             _selectedTitleLabel.Text = adapter.Name ?? "Unnamed adapter";
             string adapterStatus = string.IsNullOrWhiteSpace(adapter.Status) ? "Status unknown" : adapter.Status;
             string staleSuffix = _adapterDataStale ? "  •  Last known values — refresh required" : string.Empty;
-            _selectedStatusLabel.Text = adapterStatus + "  •  " + (adapter.IsUp ? "Connected" : "Disconnected") + staleSuffix;
+            // The restriction is stated in the detail pane, not only in the list and the
+            // tooltip. An adapter that MacRando will refuse to change should say so
+            // before the user picks a button, rather than after it fails.
+            string kindSuffix = adapter.IsChangeable
+                ? string.Empty
+                : "  •  " + AdapterClassification.DescribeKind(adapter.Kind) + " adapter — read-only here";
+            _selectedStatusLabel.Text = adapterStatus + "  •  " + (adapter.IsUp ? "Connected" : "Disconnected") + staleSuffix + kindSuffix;
+            _toolTip.SetToolTip(
+                _selectedStatusLabel,
+                _selectedStatusLabel.Text + (adapter.IsChangeable ? string.Empty : "  •  " + adapter.Restriction));
             _currentMacLabel.Text = DisplayMac(adapter.MacAddress);
             _permanentMacLabel.Text = DisplayMac(adapter.PermanentMacAddress);
             _networkIpLabel.Text = string.IsNullOrWhiteSpace(adapter.IpAddress) ? "—" : adapter.IpAddress + "/" + adapter.PrefixLength;
@@ -1517,7 +1538,6 @@ namespace MacRando
             _toolTip.SetToolTip(_guidLabel, "Interface GUID: " + _guidLabel.Text);
             UpdateFavoriteButton();
             _toolTip.SetToolTip(_selectedTitleLabel, _selectedTitleLabel.Text);
-            _toolTip.SetToolTip(_selectedStatusLabel, _selectedStatusLabel.Text);
             _toolTip.SetToolTip(_currentMacLabel, "Current MAC: " + _currentMacLabel.Text);
             _toolTip.SetToolTip(_permanentMacLabel, "Permanent MAC: " + _permanentMacLabel.Text);
             _toolTip.SetToolTip(_networkIpLabel, "IPv4 address: " + _networkIpLabel.Text);
@@ -1554,7 +1574,8 @@ namespace MacRando
 
         private bool CanUseMac()
         {
-            return !_adapterDataStale && _selectedAdapter != null && _selectedAdapter.MacPropertySupported;
+            return !_adapterDataStale && _selectedAdapter != null &&
+                _selectedAdapter.MacPropertySupported && _selectedAdapter.IsChangeable;
         }
 
         private bool CanRestorePermanent()
@@ -1571,9 +1592,24 @@ namespace MacRando
             return !_adapterDataStale && IsLocalIpEligible(_selectedAdapter, AllowDhcpIpRandomization);
         }
 
+        /// <summary>
+        /// Guards the auto-apply path. A preset bound to a network names an adapter, and
+        /// that adapter may since have been replaced, or may turn out to be a tunnel. The
+        /// dashboard's disabled buttons are not a defence here because nothing in the
+        /// user interface is involved: the network-change watcher calls this directly.
+        /// </summary>
+        internal static bool CanAutoApplyTo(AdapterInfo adapter)
+        {
+            return adapter != null && adapter.IsChangeable && adapter.IsUp;
+        }
+
         internal static bool IsLocalIpEligible(AdapterInfo adapter, bool allowDhcpIp)
         {
-            return adapter != null && adapter.IsUp && !string.IsNullOrWhiteSpace(adapter.IpAddress) &&
+            // Changeable, not just connected: a tunnel or virtual machine adapter is up
+            // with a perfectly good IPv4 address, and randomising it would break the
+            // thing it belongs to.
+            return adapter != null && adapter.IsUp && adapter.IsChangeable &&
+                !string.IsNullOrWhiteSpace(adapter.IpAddress) &&
                 adapter.PrefixLength >= 1 && adapter.PrefixLength <= 30 &&
                 !adapter.IpAddress.StartsWith("169.254.", StringComparison.OrdinalIgnoreCase) &&
                 (!adapter.DhcpEnabled || allowDhcpIp);
@@ -1691,7 +1727,15 @@ namespace MacRando
 
             bool selected = e.Item.Selected;
             Color background = selected ? _listSelectedColor : _listInputColor;
-            Color foreground = selected ? _listSelectedTextColor : _listTextColor;
+            // Read from the item rather than the theme, because the list is owner drawn:
+            // setting ListViewItem.ForeColor has no effect when DrawAdapterItem paints
+            // every cell itself, which is how an off-limits adapter first came out looking
+            // identical to a real one.
+            AdapterInfo drawn = e.Item.Tag as AdapterInfo;
+            bool changeable = drawn == null || drawn.IsChangeable;
+            Color foreground = selected
+                ? _listSelectedTextColor
+                : (changeable ? _listTextColor : _listMutedColor);
             using (SolidBrush brush = new SolidBrush(background))
             using (Pen pen = new Pen(_listHeaderColor))
             {
@@ -1745,6 +1789,7 @@ namespace MacRando
             _listInputColor = input;
             _listHeaderColor = listHeader;
             _listTextColor = text;
+            _listMutedColor = secondary;
             _listSelectedColor = accent;
             _listSelectedTextColor = dark ? Color.FromArgb(15, 23, 42) : Color.White;
             BackColor = background;
