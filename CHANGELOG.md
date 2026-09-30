@@ -1,5 +1,12 @@
 # MacRando Changelog
 
+## 1.13.1 - 2026.09
+
+### Fixed
+
+- **The test suite was writing to the real state file.** A test that constructs a `TrayContext` registers an `Application.Idle` handler that performs a genuine refresh, and the tests pump the message loop, so a context left on the default data root re-read and re-wrote the user's real `state.json`. This was introduced in 1.9.0 when the tray menu tests were added. It was not visible as a test failure, and the only symptom was the pending-profile count in the real state file oscillating during a test run. `TrayContext` now takes an optional data root, the tests use a temporary directory, and a test asserts the real state file is left byte-for-byte identical.
+- **The updater's refusal was a bare error dialog.** The install guard refuses while any restore profile is pending, because installing closes MacRando and the profile must be resolved first. That is correct, but it named the condition rather than the thing blocking it, so a user hitting it had no way to tell which adapter to restore. The refusal now names the adapters and says the banner can be used to resolve them.
+
 ## 1.13.0 - 2026.09
 
 ### Added

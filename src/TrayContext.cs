@@ -76,15 +76,26 @@ namespace MacRando
         private int _networkAutoApplyInFlight;
 
         public TrayContext()
-            : this(false)
+            : this(false, null)
         {
         }
 
         internal TrayContext(bool startupLaunch)
+            : this(startupLaunch, null)
+        {
+        }
+
+        /// <summary>
+        /// <paramref name="dataRoot"/> redirects the state and settings stores. It exists
+        /// so a test constructing a context cannot read or write the real user data: this
+        /// type registers an Application.Idle handler that performs a genuine refresh, so a
+        /// test that pumps the message loop will happily rewrite the real state file.
+        /// </summary>
+        internal TrayContext(bool startupLaunch, string dataRoot)
         {
             _startupLaunch = startupLaunch;
             _network = new NetworkService();
-            _stateStore = new StateStore();
+            _stateStore = dataRoot == null ? new StateStore() : new StateStore(dataRoot);
             try
             {
                 _state = _stateStore.Load();
@@ -103,7 +114,9 @@ namespace MacRando
             _diagnostics = new DiagnosticsService(_network);
             _deviceTracking = new DeviceTrackingService();
             _updateService = new UpdateService();
-            _settingsStore = new AppSettingsStore();
+            _settingsStore = dataRoot == null
+                ? new AppSettingsStore()
+                : new AppSettingsStore(Path.Combine(dataRoot, "settings.json"));
             _settings = _settingsStore.Load();
             if (_settings.StartWithWindows && !IsStartupRegistrationPresent())
             {
@@ -982,6 +995,9 @@ namespace MacRando
             string blockReason;
             if (!UpdateInstaller.CanInstall(result, pending, false, AppInfo.Version, out blockReason))
             {
+                // Named here as well as at install time, because the update report is where
+                // a user looks first and it is the screen shown when a check succeeds.
+                AppLogger.Info("Update install is not available yet: " + AppLogger.Sanitize(blockReason));
                 _form.SetStatus("The update was downloaded but cannot be installed yet.");
                 ShowReadOnlyReport(
                     "MacRando update ready, install blocked",
@@ -1030,6 +1046,47 @@ namespace MacRando
             return string.Join(Environment.NewLine, lines.ToArray());
         }
 
+        /// <summary>
+        /// Turns the guard's reason into something actionable.
+        ///
+        /// The guard refuses while a restore profile is pending, which is right, but
+        /// "restore the pending adapter profiles" does not tell a user which adapter or
+        /// where to look. Saying that costs nothing and is the difference between a user
+        /// who can fix it and one who concludes the updater is broken.
+        /// </summary>
+        private string ExplainInstallRefusal(string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                return "The update cannot be installed right now.";
+            }
+            if (_state == null || _state.Backups == null || _state.Backups.Count == 0)
+            {
+                return reason;
+            }
+            var names = new List<string>();
+            foreach (AdapterBackup backup in _state.Backups.Values)
+            {
+                if (backup != null && !string.IsNullOrWhiteSpace(backup.DisplayName))
+                {
+                    names.Add(backup.DisplayName);
+                }
+            }
+            if (names.Count == 0)
+            {
+                return reason;
+            }
+
+            string list = string.Join(", ", names.ToArray());
+            string article = names.Count == 1 ? "adapter has" : "adapters have";
+            return reason + Environment.NewLine + Environment.NewLine +
+                "Pending: " + list + "." + Environment.NewLine +
+                "That " + article + " a restore profile that has not been put back. " +
+                "Use Restore on the dashboard, or Restore all from the tray menu, and the " +
+                "update can then be installed. If the adapter looks correct already and you " +
+                "want to keep the change instead, use Keep change.";
+        }
+
         private async Task InstallVerifiedUpdateAsync(UpdateCheckResult result)
         {
             if (_busy || _confirmationOpen)
@@ -1041,7 +1098,7 @@ namespace MacRando
             string reason;
             if (!UpdateInstaller.CanInstall(result, pending, _busy, AppInfo.Version, out reason))
             {
-                ShowError(new InvalidOperationException(reason));
+                ShowError(new InvalidOperationException(ExplainInstallRefusal(reason)));
                 return;
             }
 

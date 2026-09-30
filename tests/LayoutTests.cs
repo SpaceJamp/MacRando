@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Windows.Forms;
@@ -39,6 +40,7 @@ internal static class LayoutTests
             NothingOverlapsUnderHighDpiScaling();
             TheTrayMenuIsSensiblyOrdered();
             SectionHeadersAreNotClickable();
+            ConstructingATrayContextDoesNotTouchRealData();
             TrayStatusWording();
             Console.WriteLine("layout-tests=OK;checks=" + _checks);
             return 0;
@@ -148,11 +150,30 @@ internal static class LayoutTests
             "the permission problem should look different from a pending restore");
     }
 
+    /// <summary>
+    /// A sandbox for tests that need a real TrayContext.
+    ///
+    /// Constructing one registers an Application.Idle handler that performs a genuine
+    /// refresh, and the tests pump the message loop, so a context left on the default data
+    /// root rewrites the real state file. That happened: the profile count in the real
+    /// state file oscillated during a test run, and it left a pending restore profile that
+    /// then blocked the updater. The sandbox makes it impossible.
+    /// </summary>
+    private static string NewSandbox()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "MacRandoTrayTest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
     private static void TheTrayMenuIsSensiblyOrdered()
     {
+        string sandbox = NewSandbox();
+        try
+        {
         RunOnUiThread(delegate
         {
-            using (TrayContext context = new TrayContext())
+            using (TrayContext context = new TrayContext(false, sandbox))
             {
                 ContextMenuStrip menu = (ContextMenuStrip)typeof(TrayContext)
                     .GetField("_menu", BindingFlags.Instance | BindingFlags.NonPublic)
@@ -228,13 +249,61 @@ internal static class LayoutTests
                     "Exit should be the last item, but it is at " + exitIndex + " of " + labels.Count);
             }
         });
+        }
+        finally
+        {
+            try { Directory.Delete(sandbox, true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// The regression that matters here: a test must not be able to touch the real user
+    /// data. This constructs a context against the real data root, the way the test suite
+    /// used to, and asserts the real state file is left byte-for-byte identical. If the
+    /// sandbox is ever dropped from the tests, this fails.
+    /// </summary>
+    private static void ConstructingATrayContextDoesNotTouchRealData()
+    {
+        string realState = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MacRando", "state.json");
+        string before = File.Exists(realState)
+            ? Convert.ToBase64String(File.ReadAllBytes(realState))
+            : "(absent)";
+
+        string sandbox = NewSandbox();
+        try
+        {
+            RunOnUiThread(delegate
+            {
+                using (new TrayContext(false, sandbox))
+                {
+                }
+            });
+        }
+        finally
+        {
+            try { Directory.Delete(sandbox, true); } catch { }
+        }
+
+        string after = File.Exists(realState)
+            ? Convert.ToBase64String(File.ReadAllBytes(realState))
+            : "(absent)";
+        Check(before == after,
+            "constructing a TrayContext in a test must not modify the real state file");
+
+        // And the sandbox must actually have been used, so the check above is not passing
+        // because nothing happened at all.
+        Check(!Directory.Exists(sandbox), "the sandbox should have been cleaned up");
     }
 
     private static void SectionHeadersAreNotClickable()
     {
+        string sandbox = NewSandbox();
+        try
+        {
         RunOnUiThread(delegate
         {
-            using (TrayContext context = new TrayContext())
+            using (TrayContext context = new TrayContext(false, sandbox))
             {
                 ContextMenuStrip menu = (ContextMenuStrip)typeof(TrayContext)
                     .GetField("_menu", BindingFlags.Instance | BindingFlags.NonPublic)
@@ -280,6 +349,11 @@ internal static class LayoutTests
                 }
             }
         });
+        }
+        finally
+        {
+            try { Directory.Delete(sandbox, true); } catch { }
+        }
     }
 
     private static List<Control> All(Control root)
