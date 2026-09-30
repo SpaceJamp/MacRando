@@ -89,7 +89,21 @@ $innoCandidates = @(
 )
 $iscc = $innoCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($iscc) {
-    $setupOutput = & $iscc "/DAppVersion=$Version" (Join-Path $root 'installer.iss') 2>&1
+    # The installer only ships the public certificate and the script that installs it when
+    # this build was signed, because it has no certificate to ship otherwise. Decided here
+    # and passed as a define, rather than tested inside the installer, because Inno Setup
+    # validates that every [Files] source exists while compiling and before any Check
+    # function runs. Listing the certificate unconditionally made the installer impossible
+    # to compile on an unsigned build, which is every GitHub-hosted release run.
+    $innoDefines = @("/DAppVersion=$Version")
+    if (Test-Path $publicCert) {
+        $innoDefines += '/DIncludeSigningCertificate'
+        Write-Host 'The installer will include the public signing certificate.'
+    }
+    else {
+        Write-Host 'The installer will not include the trust option, because this build is unsigned.'
+    }
+    $setupOutput = & $iscc $innoDefines (Join-Path $root 'installer.iss') 2>&1
     if ($LASTEXITCODE -ne 0) {
         $setupOutput | ForEach-Object { Write-Host $_ }
         throw "The installer failed to compile with exit code $LASTEXITCODE."

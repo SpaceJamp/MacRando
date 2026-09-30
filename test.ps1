@@ -84,6 +84,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "Release notes test failed with exit code $LASTEXITCODE."
 }
 
+# The installer is compiled both signed and unsigned. An unsigned build is what every
+# GitHub-hosted release run produces, and an unconditional reference to the signing
+# certificate made the Release workflow fail on all 33 of its runs without anyone noticing.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tests\InstallerCompileTests.ps1')
+if ($LASTEXITCODE -ne 0) {
+    throw "Installer compile test failed with exit code $LASTEXITCODE."
+}
+
 # The combined network snapshot is timed against the two-launch path it replaced, so the
 # change that halves the process launches per refresh cannot silently become a regression.
 # Read-only: every variant only queries.

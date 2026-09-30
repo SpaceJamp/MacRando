@@ -51,7 +51,10 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 ; Trusting a self-signed certificate makes Windows treat this publisher as verified, which
 ; suppresses the unknown-publisher warning. That is a real security decision about the
 ; machine, so it is offered rather than done, and it is off unless explicitly ticked.
+; Not offered at all on an unsigned build, where there is no certificate to trust.
+#ifdef IncludeSigningCertificate
 Name: "trustcertificate"; Description: "Trust the signing certificate on this computer (removes the unknown-publisher warning)"; GroupDescription: "Optional:"
+#endif
 Name: "startwithwindows"; Description: "Start MacRando when Windows starts"; GroupDescription: "Optional:"; Flags: unchecked
 
 [Files]
@@ -61,10 +64,22 @@ Source: "bin\MacRandoTray.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
-Source: "trust-certificate.ps1"; DestDir: "{app}"; Flags: ignoreversion
-; The public certificate, so a user who declines the trust option can still run the
-; script later. The private key is never exported and never leaves the store.
+; The public certificate, and the script that installs it, are only part of a signed
+; build. package.ps1 passes /DIncludeSigningCertificate when it exported a certificate from
+; a signed executable, and omits it otherwise.
+;
+; A compile-time conditional rather than a Check: function, because Inno Setup validates
+; that every [Files] source exists while compiling, before any Check is evaluated. Listing
+; the certificate unconditionally therefore made the installer impossible to compile
+; whenever the build was unsigned, which is every GitHub-hosted run, since the signing
+; certificate does not exist there. The Release workflow therefore failed on all 33 of its
+; runs and never produced a release. The unsigned build is the entire purpose of that
+; workflow, so the certificate has to be genuinely optional rather than conditionally
+; copied at install time.
+#ifdef IncludeSigningCertificate
 Source: "dist\MacRando-Public.cer"; DestDir: "{app}"; Flags: ignoreversion
+Source: "trust-certificate.ps1"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
@@ -79,8 +94,17 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
     Flags: uninsdeletevalue; Tasks: startwithwindows
 
 [Run]
+; shellexec is required, not a preference. MacRando.exe embeds
+; requestedExecutionLevel="requireAdministrator", and a postinstall entry runs after the
+; wizard closes, by which point Setup has dropped back to the signed-in user's token. The
+; default launcher is CreateProcess, which cannot start a process whose manifest asks for
+; a higher integrity level, so it failed with "CreateProcess failed; code 740. The
+; requested operation requires elevation" and the user was met with an error instead of
+; the application. ShellExecute honours the manifest and raises the usual prompt.
+; Nothing tested this: no test runs the installer, and a silent install skips postinstall
+; entries entirely, so the failure only ever appeared for a person installing interactively.
 Filename: "{app}\{#AppExeName}"; Description: "Start {#AppName}"; \
-    Flags: nowait postinstall skipifsilent
+    Flags: nowait postinstall skipifsilent shellexec
 
 [UninstallRun]
 ; Remove the Run key on uninstall regardless of how it was added, since the application

@@ -30,6 +30,7 @@ internal static class InstalledVersionTests
             TheHelperIsCarefulOnRollback();
             TheHelperDoesNotRefuseToFinishOverTheLabel();
             TheInstallerStillRequiresAdministrator();
+            TheInstallersLaunchOfTheAppCanSucceed();
             Console.WriteLine("installed-version-tests=OK;checks=" + _checks);
             return 0;
         }
@@ -191,6 +192,48 @@ internal static class InstalledVersionTests
         Check(installer.IndexOf("#error AppVersion must be passed", StringComparison.Ordinal) >= 0,
             "installer.iss no longer refuses to compile without a version, so the version can " +
             "silently fall behind the application again");
+    }
+
+    private static void TheInstallersLaunchOfTheAppCanSucceed()
+    {
+        string installerPath = FindRepositoryFile("installer.iss");
+        if (installerPath == null)
+        {
+            return;
+        }
+        string installer = File.ReadAllText(installerPath, Encoding.UTF8);
+
+        // The application requires administrator, so the installer has to launch it in a way
+        // that can cope with that. A postinstall entry runs after the wizard closes, by which
+        // point Setup is back on the signed-in user's token, and the default CreateProcess
+        // launcher cannot start a process whose manifest asks for a higher integrity level. It
+        // failed with "CreateProcess failed; code 740" and a dialog, which is how it was found.
+        Match run = Regex.Match(installer, @"(?ms)^\[Run\]\s*$(.*?)(?=^\[)", RegexOptions.None);
+        Check(run.Success, "installer.iss has no [Run] section");
+        string runSection = run.Groups[1].Value;
+        Check(runSection.IndexOf(MacRando.AppInfo.ProductName + ".exe", StringComparison.OrdinalIgnoreCase) >= 0
+              || runSection.IndexOf("{#AppExeName}", StringComparison.Ordinal) >= 0,
+            "the [Run] section no longer launches MacRando");
+
+        Match flags = Regex.Match(runSection, @"(?i)Flags:\s*([^\r\n\\]+)");
+        Check(flags.Success, "the [Run] entry for MacRando has no Flags line");
+        Check(flags.Groups[1].Value.IndexOf("shellexec", StringComparison.OrdinalIgnoreCase) >= 0,
+            "The installer launches MacRando without the shellexec flag. MacRando requires " +
+            "administrator, and a postinstall entry runs on the signed-in user's token, so the " +
+            "default CreateProcess launcher fails with error 740 and the user is shown an error " +
+            "dialog instead of the application. Flags found: " + flags.Groups[1].Value.Trim());
+
+        // The source manifest is what makes the above necessary, so the two are checked
+        // together. If the application ever stopped requiring elevation this would become
+        // unnecessary rather than wrong, which is why it is pinned rather than assumed.
+        string manifestPath = FindRepositoryFile(Path.Combine("src", "app.manifest"));
+        if (manifestPath != null)
+        {
+            string manifest = File.ReadAllText(manifestPath, Encoding.UTF8);
+            Check(Regex.IsMatch(manifest, @"requestedExecutionLevel\s+level\s*=\s*""requireAdministrator"""),
+                "MacRando no longer requests administrator in src/app.manifest. The application " +
+                "changes adapters, so it still needs it, and the installer decision above depends on it.");
+        }
     }
 
     /// <summary>

@@ -19,7 +19,9 @@ jobs:
     runs-on: windows-2022
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # v7 runs on Node 24. v4 targeted Node 20, which GitHub has deprecated, so the
+        # runner forced it onto Node 24 anyway and warned on every run.
+        uses: actions/checkout@v7
         with:
           # Full history so `git rev-list` can resolve the tag being released.
           fetch-depth: 0
