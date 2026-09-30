@@ -149,29 +149,101 @@ namespace MacRando
             return string.Empty;
         }
 
+        private const int MaxRedirects = 5;
+
         /// <summary>
-        /// A 3xx is treated as a failure rather than followed. The redirect status is
-        /// named in the message so a user pointing the manifest at a shortener or a
-        /// tracking link is told what happened instead of getting a bare network error.
+        /// Sends the request, following redirects by hand.
+        ///
+        /// This used to refuse every 3xx outright, on the reasoning that a redirect could
+        /// downgrade the connection to plain HTTP. That reasoning is sound but the
+        /// implementation was wrong about GitHub: a release-asset URL answers 302 to a
+        /// signed blob URL as a matter of design, so every build from 1.11.0 onward
+        /// refused its own update manifest and the updater never worked against a real
+        /// release. The old message even told the user to set the manifest URL to the
+        /// final address, which is not a thing anyone can do: that address carries a
+        /// short-lived signature and expires.
+        ///
+        /// What is worth protecting is that the transfer never leaves TLS, so a redirect
+        /// is followed only while every hop is HTTPS, and the chain is capped. Integrity
+        /// does not rest on this alone in any case: the manifest is fetched over TLS and
+        /// the download is checked against both the SHA-256 and the Authenticode signer
+        /// named in that manifest, so a hostile redirect cannot yield a payload that
+        /// passes both checks.
         /// </summary>
-        private static void RejectRedirect(HttpResponseMessage response, string what)
+        /// <summary>
+        /// Works out where a 3xx points, and refuses it if the hop would leave TLS.
+        ///
+        /// Split out from the sending loop so the decision can be tested directly. It used
+        /// to be inline, and the only way to assert anything about it was to run a live
+        /// HTTPS server, which is why the original test asserted a method that no longer
+        /// existed.
+        /// </summary>
+        internal static Uri ResolveRedirect(Uri current, HttpResponseMessage response, string what, int code)
         {
-            int code = (int)response.StatusCode;
-            if (code < 300 || code >= 400)
+            var location = response.Headers.Location;
+            if (location == null)
             {
-                return;
+                throw new InvalidOperationException(
+                    "The " + what + " URL returned HTTP " + code + " with no location to follow.");
             }
-            throw new InvalidOperationException(
-                "The " + what + " URL redirected (HTTP " + code + "). Redirects are not followed, " +
-                "because a redirect could downgrade the connection to plain HTTP. " +
-                "Set the manifest URL to the final address.");
+
+            Uri next;
+            if (location.IsAbsoluteUri)
+            {
+                next = new Uri(location.AbsoluteUri, UriKind.Absolute);
+            }
+            else
+            {
+                try
+                {
+                    // Resolving against an https base keeps a relative location on https.
+                    next = new Uri(current, location);
+                }
+                catch (UriFormatException)
+                {
+                    throw new InvalidOperationException(
+                        "The " + what + " URL returned HTTP " + code + " with an unusable location.");
+                }
+            }
+
+            if (!string.Equals(next.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "The " + what + " URL redirected to a non-HTTPS address (" + next.Scheme +
+                    "://), which is refused so the transfer cannot be downgraded to plain HTTP.");
+            }
+            return next;
+        }
+
+        private static async Task<HttpResponseMessage> SendAllowingHttpsRedirectsAsync(Uri uri, string what)
+        {
+            Uri current = uri;
+            for (int hop = 0; ; hop++)
+            {
+                HttpResponseMessage response = await Client.GetAsync(current);
+                int code = (int)response.StatusCode;
+                if (code < 300 || code >= 400)
+                {
+                    return response;
+                }
+
+                Uri next = ResolveRedirect(current, response, what, code);
+                if (hop >= MaxRedirects)
+                {
+                    response.Dispose();
+                    throw new InvalidOperationException(
+                        "The " + what + " URL redirected more than " + MaxRedirects + " times.");
+                }
+
+                response.Dispose();
+                current = next;
+            }
         }
 
         private static async Task<string> ReadAllTextStrict(Uri uri)
         {
-            using (HttpResponseMessage response = await Client.GetAsync(uri))
+            using (HttpResponseMessage response = await SendAllowingHttpsRedirectsAsync(uri, "update manifest"))
             {
-                RejectRedirect(response, "update manifest");
                 if (!response.IsSuccessStatusCode)
                 {
                     throw new InvalidOperationException(
@@ -183,9 +255,8 @@ namespace MacRando
 
         private static async Task<byte[]> ReadAllBytesStrict(Uri uri)
         {
-            using (HttpResponseMessage response = await Client.GetAsync(uri))
+            using (HttpResponseMessage response = await SendAllowingHttpsRedirectsAsync(uri, "update download"))
             {
-                RejectRedirect(response, "update download");
                 if (!response.IsSuccessStatusCode)
                 {
                     throw new InvalidOperationException(
@@ -198,14 +269,13 @@ namespace MacRando
         private static HttpClient CreateClient()
         {
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-            // Redirects are refused rather than followed. The manifest and the download
-            // are each checked for an https scheme before the request is made, but a
-            // server answering 302 with an http:// location would otherwise downgrade the
-            // transfer after that check had already passed, which is exactly the position
-            // an active network attacker wants. The refusal lives on the handler because
-            // HttpClient itself only exposes automatic redirection as a boolean, and
-            // disabling it globally on ServicePointManager would change behaviour for
-            // every other request in the process.
+            // Automatic redirection stays off, but redirects are now followed by hand in
+            // SendAllowingHttpsRedirectsAsync rather than refused. The reason is on the
+            // handler and in that method together: the built-in follower cannot be told to
+            // check the scheme of each hop, and refusing every redirect broke the updater
+            // against GitHub, which 302s release-asset URLs by design. It stays off here
+            // also because disabling it globally on ServicePointManager would change
+            // behaviour for every other request in the process.
             var handler = new HttpClientHandler
             {
                 AllowAutoRedirect = false

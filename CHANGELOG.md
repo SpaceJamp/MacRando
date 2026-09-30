@@ -1,5 +1,17 @@
 # MacRando Changelog
 
+## 1.13.2 - 2026.09
+
+### Fixed
+
+- **The updater could not fetch the update manifest. This is why "Check for updates" did nothing.** From 1.11.0 onward the update client refused every HTTP 3xx, on the reasoning that a redirect could downgrade the transfer to plain HTTP. The reasoning is sound but it was wrong about how GitHub works: a release-asset URL answers `302` pointing at a signed, expiring blob URL, as a matter of design. So every build from 1.11.0 to 1.13.1 threw on its own manifest URL and could never see a release. The error even advised setting the manifest URL to the final address, which is not possible to do by hand because that address carries a short-lived signature.
+
+  Redirects are now followed by hand, with the property that actually mattered kept: a hop that would leave HTTPS is refused, and the chain is capped. Integrity never depended on this alone, since the download is checked against both the SHA-256 and the Authenticode signer named in a manifest that was itself fetched over TLS.
+
+  The old test asserted that every 3xx was refused, so it locked the bug in. It now covers what GitHub really sends, refuses every downgrade scheme including `file://` and `ftp://`, accepts a relative location resolved against the HTTPS base, and a new test fetches the live published manifest end to end, so a URL that stops resolving, stops redirecting, or redirects off HTTPS fails the suite.
+
+  Builds 1.11.0 to 1.13.1 cannot be updated by the updater, because the bug is in the code doing the updating. 1.13.2 has to be installed once by hand; the updater works from here.
+
 ## 1.13.1 - 2026.09
 
 ### Fixed

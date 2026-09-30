@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Text;
+using System.Threading.Tasks;
 using AppSettings = MacRando.AppSettings;
 using UpdateTrustEnvelope = MacRando.UpdateTrustEnvelope;
 using UpdateTrustPayload = MacRando.UpdateTrustPayload;
@@ -31,7 +32,8 @@ internal static class UpdateTrustTests
             SavingClearsTheValuesFromTheClearTextFile();
             TrustFileSurvivesWhenTheSettingsFileIsDeleted();
             PreferencesAreStillInClearText();
-            RedirectsAreRefused();
+            RedirectsAreResolvedButNeverDowngraded();
+            TheLiveManifestIsReachableThroughARedirect();
             Console.WriteLine("update-trust-tests=OK;checks=" + _checks);
             return 0;
         }
@@ -213,62 +215,187 @@ internal static class UpdateTrustTests
         }
     }
 
-    private static void RedirectsAreRefused()
+    /// <summary>
+    /// The redirect policy: HTTPS hops are followed, anything that leaves TLS is refused.
+    ///
+    /// This test previously asserted that every 3xx was refused, which was the bug rather
+    /// than the requirement. GitHub answers a release-asset URL with 302 to a signed blob
+    /// URL by design, so that policy made the updater unable to reach its own manifest.
+    /// The example below is the redirect GitHub actually sends.
+    /// </summary>
+    private static void RedirectsAreResolvedButNeverDowngraded()
     {
-        // A fresh handler allows redirects, which is the framework default and exactly
-        // what the update client must not inherit. Asserted so the default is visible:
-        // if this ever becomes false the default has changed and the comparison below
-        // would pass for the wrong reason.
-        var frameworkDefault = new System.Net.Http.HttpClientHandler();
-        Check(frameworkDefault.AllowAutoRedirect,
-            "a default handler is expected to follow redirects, otherwise this check is vacuous");
+        var https = new Uri("https://github.com/SpaceJamp/MacRando/releases/latest/download/update.json");
 
-        // What matters is the handler the update client actually builds.
-        System.Reflection.FieldInfo clientField = typeof(MacRando.UpdateService).GetField(
-            "Client", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        Check(clientField != null, "the update service should hold a single static client");
-        var client = (System.Net.Http.HttpClient)clientField.GetValue(null);
-        Check(client != null, "the update client should exist");
+        System.Reflection.MethodInfo resolve = typeof(MacRando.UpdateService).GetMethod(
+            "ResolveRedirect",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Check(resolve != null, "the update service should expose its redirect decision");
 
-        // The handler is private to the client, so the refusal is asserted at the point
-        // that actually enforces it: a 3xx response is treated as a failure. A redirect
-        // that was being followed would never produce a 3xx here.
-        System.Reflection.MethodInfo reject = typeof(MacRando.UpdateService).GetMethod(
-            "RejectRedirect", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        Check(reject != null, "the update service should have a redirect check");
+        // The real GitHub hop: https -> https, must be followed.
+        var blob = new Uri("https://release-assets.githubusercontent.com/github-production-release-asset/x?sig=abc");
+        using (var response = new System.Net.Http.HttpResponseMessage(HttpStatusCode.Found))
+        {
+            response.Headers.Location = blob;
+            Uri followed = (Uri)resolve.Invoke(null, new object[] { https, response, "update manifest", 302 });
+            Check(followed == blob, "an https-to-https redirect must be followed to its target");
+        }
 
+        // Every redirect status GitHub or a CDN might use must resolve the same way,
+        // because 1.11.0-1.13.1 refused all of them and broke the updater.
         foreach (int code in new[] { 301, 302, 303, 307, 308 })
         {
-            bool threw = false;
-            try
+            using (var response = new System.Net.Http.HttpResponseMessage((HttpStatusCode)code))
             {
-                reject.Invoke(null, new object[]
-                {
-                    new System.Net.Http.HttpResponseMessage((HttpStatusCode)code),
-                    "update manifest"
-                });
+                response.Headers.Location = blob;
+                Uri followed = (Uri)resolve.Invoke(null, new object[] { https, response, "update manifest", code });
+                Check(followed == blob, "HTTP " + code + " to an https address must be followed");
             }
-            catch (System.Reflection.TargetInvocationException)
-            {
-                threw = true;
-            }
-            Check(threw, "HTTP " + code + " must be refused rather than followed");
         }
 
-        // A success must pass through untouched, or the client could never fetch anything.
-        bool passedThrough = true;
+        // The property that is actually worth protecting: a hop to plain HTTP is refused,
+        // for every redirect status and for a relative location that resolves to http.
+        foreach (int code in new[] { 301, 302, 303, 307, 308 })
+        {
+            using (var response = new System.Net.Http.HttpResponseMessage((HttpStatusCode)code))
+            {
+                response.Headers.Location = new Uri("http://evil.example.com/update.json");
+                Check(ThrowsOnResolve(resolve, https, response, "update manifest", code),
+                    "HTTP " + code + " to a plain-HTTP address must be refused");
+            }
+        }
+
+        // A relative location resolves against the https base, so it stays encrypted and
+        // must be accepted. This is the case a naive scheme check on the raw Location
+        // string would wrongly reject.
+        using (var response = new System.Net.Http.HttpResponseMessage(HttpStatusCode.Found))
+        {
+            response.Headers.Location = new Uri("/releases/download/v1/update.json", UriKind.Relative);
+            Uri followed = (Uri)resolve.Invoke(null, new object[] { https, response, "update manifest", 302 });
+            Check(followed.Scheme == Uri.UriSchemeHttps && followed.AbsolutePath == "/releases/download/v1/update.json",
+                "a relative redirect must resolve against the https base and be followed");
+        }
+
+        // A redirect with nowhere to go is an error rather than a silent no-op.
+        using (var response = new System.Net.Http.HttpResponseMessage(HttpStatusCode.Found))
+        {
+            Check(ThrowsOnResolve(resolve, https, response, "update manifest", 302),
+                "a redirect with no location must be refused");
+        }
+
+        // A scheme that is not http at all must not be treated as acceptable.
+        foreach (string odd in new[] { "file:///C:/Windows/System32/drivers/etc/hosts", "ftp://example.com/update.json" })
+        {
+            using (var response = new System.Net.Http.HttpResponseMessage(HttpStatusCode.Found))
+            {
+                response.Headers.Location = new Uri(odd);
+                Check(ThrowsOnResolve(resolve, https, response, "update manifest", 302),
+                    "a redirect to " + odd + " must be refused");
+            }
+        }
+    }
+
+    private static bool ThrowsOnResolve(System.Reflection.MethodInfo resolve, Uri current,
+        System.Net.Http.HttpResponseMessage response, string what, int code)
+    {
         try
         {
-            reject.Invoke(null, new object[]
-            {
-                new System.Net.Http.HttpResponseMessage(HttpStatusCode.OK),
-                "update manifest"
-            });
+            resolve.Invoke(null, new object[] { current, response, what, code });
+            return false;
         }
-        catch
+        catch (System.Reflection.TargetInvocationException)
         {
-            passedThrough = false;
+            return true;
         }
-        Check(passedThrough, "a successful response must not be refused");
+    }
+
+    /// <summary>
+    /// The manifest a real release points at, fetched end to end.
+    ///
+    /// The redirect policy above is a unit test of a decision function, which cannot catch
+    /// the thing that actually broke: that the live manifest is served through a redirect.
+    /// This asks GitHub for the real published manifest, so if the URL stops resolving, or
+    /// stops redirecting, or redirects somewhere that is not https, the suite fails.
+    /// </summary>
+    private static void TheLiveManifestIsReachableThroughARedirect()
+    {
+        // This waits on an async call, and earlier suites in the same process leave a
+        // Windows Forms synchronisation context installed, so blocking the calling thread
+        // would deadlock instead of returning. Run the body where no context is captured.
+        Task.Run(delegate { CheckTheLiveManifest(); }).GetAwaiter().GetResult();
+    }
+
+    private static void CheckTheLiveManifest()
+    {
+        const string manifestUrl =
+            "https://github.com/SpaceJamp/MacRando/releases/latest/download/update.json";
+
+        // The test host may not default to TLS 1.2, which GitHub requires. The app sets
+        // this in UpdateService.CreateClient; the raw probe below bypasses that, so it
+        // needs the same setting or it fails on a channel error rather than on a verdict.
+        ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+
+        HttpWebRequest probe = (HttpWebRequest)WebRequest.Create(manifestUrl);
+        probe.AllowAutoRedirect = false;
+        probe.Timeout = 20000;
+        using (HttpWebResponse first = (HttpWebResponse)probe.GetResponse())
+        {
+            int code = (int)first.StatusCode;
+            Check(code == 301 || code == 302 || code == 303 || code == 307 || code == 308,
+                "the release manifest is expected to answer with a redirect, but answered HTTP " + code +
+                ". If GitHub now serves it directly that is fine, but this test should be updated" +
+                " rather than left asserting something that no longer holds.");
+
+            // The redirect must be resolved the way the service resolves it, and the result
+            // must be https: this is the hop the old code refused.
+            Uri target;
+            using (var response = new System.Net.Http.HttpResponseMessage((HttpStatusCode)code))
+            {
+                response.Headers.Location = new Uri(first.Headers["Location"]);
+                target = MacRando.UpdateService.ResolveRedirect(
+                    new Uri(manifestUrl), response, "update manifest", code);
+            }
+            Check(target.Scheme == Uri.UriSchemeHttps,
+                "the live manifest must redirect to https, but redirected to " + target.Scheme + "://");
+        }
+
+        // And following it must actually produce this project's manifest.
+        var service = new MacRando.UpdateService();
+        MacRando.UpdateCheckResult result = service.CheckAsync(manifestUrl, null).GetAwaiter().GetResult();
+        Check(!result.RequiresConfiguration,
+            "the live manifest check must not report that configuration is required: " + result.StatusMessage);
+        Check(result.Manifest != null,
+            "the live manifest must parse, otherwise the updater cannot work: " + result.StatusMessage);
+        // Not asserted: that the manifest names this build. The suite runs during
+        // release.ps1, before the new build is published, so the live manifest is
+        // deliberately one version behind at that point. What matters is that the check
+        // runs far enough to compare, and that the comparison is coherent.
+        Check(result.Manifest != null && !string.IsNullOrWhiteSpace(result.Manifest.Version),
+            "the live manifest must carry a version");
+        Check(!string.IsNullOrWhiteSpace(result.Manifest.DownloadUrl),
+            "the live manifest must carry a download URL");
+        Check(string.IsNullOrWhiteSpace(result.Manifest.Sha256) == false,
+            "the live manifest must carry a SHA-256, or nothing could be verified");
+        Check(string.IsNullOrWhiteSpace(result.Manifest.SignerThumbprint) == false,
+            "the live manifest must carry a signer thumbprint, or nothing could be verified");
+
+        // The comparison must actually be reached. Before the redirect fix this threw
+        // before the version was ever parsed, so a passing parse alone would not have
+        // caught the regression.
+        Version published;
+        if (Version.TryParse(result.Manifest.Version, out published))
+        {
+            Version current = Version.Parse(MacRando.AppInfo.Version);
+            bool shouldOffer = published > current;
+            Check(result.IsUpdateAvailable == shouldOffer,
+                "with the published manifest at " + published + " and this build at " + current +
+                ", an update should be offered = " + shouldOffer + ", but the check said " +
+                result.IsUpdateAvailable);
+            if (shouldOffer)
+            {
+                Check(result.StatusMessage.Contains(published.ToString()),
+                    "an available update should name the version, but the message was: " + result.StatusMessage);
+            }
+        }
     }
 }
