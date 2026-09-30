@@ -1,5 +1,19 @@
 # MacRando Changelog
 
+## 1.16.0 - 2026.09
+
+### Fixed
+
+- **The version in "Apps & features" now updates when MacRando updates itself.** Windows reads the version in Add or remove programs from the `DisplayVersion` value in the uninstall registry key, and only the installer writes that key. The updater replaced the executable and nothing else, so after an in-app update the Settings list carried on showing whichever version the installer last wrote, permanently. It is a cosmetic string and the application was working, so nothing reported it.
+
+  The elevated update helper now publishes the installed version after it swaps the file. The value is read back out of the installed executable rather than taken on trust from the environment, so a mismatch publishes what is actually on disk. Both rollback paths put the version back with the binary, so a reverted install does not advertise a build that is no longer there.
+
+  Deliberately forgiving, because it is a label in a settings list. A copy run from a ZIP has no uninstall entry and must not grow one, so the write is skipped when the key is absent, and a failure is logged rather than raised rather than refusing to finish an install over a version string.
+
+  The Inno Setup `AppId` is now a constant in the application with a test comparing it against `installer.iss`. The two are edited separately and a mismatch is silent by nature: the write targets a key that does not exist, is skipped, and the version stays stale exactly as before.
+
+- **The update helper no longer reports publishing a version it did not publish.** The registry write relied on the script-wide `ErrorActionPreference` to make a denied write terminating. Without that, a denied write is a non-terminating error, the catch never ran, and the helper went on to log success. Found by running the real extracted helper unelevated against the real key. The call now asks for a terminating error itself.
+
 ## 1.15.0 - 2026.09
 
 ### Added

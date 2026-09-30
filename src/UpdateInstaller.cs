@@ -20,6 +20,23 @@ namespace MacRando
     internal static class UpdateInstaller
     {
         public const string StartupMarkerPrefix = "update-startup-";
+
+        /// <summary>
+        /// The Inno Setup AppId, which is also the name of the uninstall registry key.
+        ///
+        /// The installer writes it and the updater has to write the same one, and nothing
+        /// would report a mismatch: a wrong key simply does not exist, the write is skipped,
+        /// and the installed program keeps showing the version the installer last wrote. A
+        /// test compares this against installer.iss, because the two are edited separately
+        /// and the failure is silent by nature.
+        /// </summary>
+        public const string InstallerAppId = "{B4D1E8B5-4D1C-4C77-9B27-2D22B6D6F1A0}";
+
+        /// <summary>
+        /// The uninstall key Inno Setup creates, which is the AppId with "_is1" appended.
+        /// </summary>
+        public const string UninstallKeyName = InstallerAppId + "_is1";
+
         private const int DefaultWatchdogSeconds = 40;
         private const int DefaultExitWaitSeconds = 300;
 
@@ -245,6 +262,11 @@ namespace MacRando
             // The hash the download was verified against, so the helper can re-check it at
             // the moment of the copy rather than trusting the main process's earlier check.
             startInfo.EnvironmentVariables["MACRANDO_SHA256"] = result.Manifest.Sha256;
+            // The version to publish to Windows once the file is in place, and the uninstall
+            // key to publish it under. Passed through the environment like everything else
+            // this script reads, so no string is ever quoted into a command line.
+            startInfo.EnvironmentVariables["MACRANDO_VERSION"] = version;
+            startInfo.EnvironmentVariables["MACRANDO_UNINSTALL_KEY"] = UninstallKeyName;
 
             // The helper inherits elevation from this process, so it can replace the
             // executable even when MacRando is installed under Program Files.
@@ -287,6 +309,62 @@ $self       = $MyInvocation.MyCommand.Path
 
 function Write-Log([string]$message) {
     try { Add-Content -LiteralPath $log -Value ((Get-Date).ToString('u') + ' ' + $message) } catch { }
+}
+
+# Publish the installed version where Windows shows it.
+#
+# 'Add or remove programs' reads DisplayVersion out of the uninstall registry key, and only
+# the installer writes that key. The updater replaced the executable and nothing else, so
+# after an in-app update the Settings list carried on showing whichever version the
+# installer last wrote, for ever. It is a cosmetic string and the app was working, which is
+# exactly why it went unnoticed.
+#
+# Deliberately forgiving. The key is only created when MacRando was installed with the
+# installer, so a copy run from a ZIP has no entry and must not grow one, and a failure
+# here is logged rather than raised, because refusing to finish an install over a label in
+# a settings list would be a bad trade. Both the 64-bit and 32-bit views are tried because
+# the key's location depends on how the installer was built.
+function Set-InstalledVersion([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return }
+    $keyName = $env:MACRANDO_UNINSTALL_KEY
+    if ([string]::IsNullOrWhiteSpace($keyName)) {
+        Write-Log 'no uninstall key name was supplied; leaving the installed version unchanged'
+        return
+    }
+    $wrote = $false
+    foreach ($hive in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+                        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
+        $path = Join-Path $hive $keyName
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        try {
+            # -ErrorAction Stop on the call itself rather than relying on the script-wide
+            # ErrorActionPreference. Without it a denied write is a non-terminating error, the
+            # catch below never runs, and the helper goes on to log that it published a version
+            # it did not write. That is how this was found: an unelevated run reported success.
+            New-ItemProperty -LiteralPath $path -Name 'DisplayVersion' -Value $value -PropertyType String -Force -ErrorAction Stop | Out-Null
+            Write-Log ('published installed version ' + $value + ' to ' + $hive)
+            $wrote = $true
+        } catch {
+            Write-Log ('could not publish the installed version to ' + $hive + ': ' + $_.Exception.Message)
+        }
+    }
+    if (-not $wrote) {
+        # Not an error. A portable copy has no uninstall entry, and creating one would put
+        # an entry in Add or remove programs for a program that was never installed.
+        Write-Log 'no uninstall entry found, so the installed version was left alone (portable copy)'
+    }
+}
+
+# The version recorded in a built executable, as three parts rather than the four-part
+# Windows file version, so it matches what the installer writes.
+function Get-FileVersionString([string]$path) {
+    try {
+        $raw = (Get-Item -LiteralPath $path).VersionInfo.FileVersion
+        if ([string]::IsNullOrWhiteSpace($raw)) { return '' }
+        $parts = @($raw -split '[.]')
+        if ($parts.Count -ge 3) { return ($parts[0] + '.' + $parts[1] + '.' + $parts[2]) }
+        return $raw.Trim()
+    } catch { return '' }
 }
 
 function Remove-Self {
@@ -352,6 +430,18 @@ try {
     Copy-Item -LiteralPath $source -Destination $target -Force
     Write-Log 'installed the new build'
 
+    # 3b. Tell Windows what version is now installed.
+    #
+    # After the copy, so the version published is the one actually on disk, and verified
+    # against the file rather than taken on trust from the environment. If the two ever
+    # disagreed, the honest thing to publish is what is in the file.
+    $fileVersion = Get-FileVersionString $target
+    $requested = $env:MACRANDO_VERSION
+    if (-not [string]::IsNullOrWhiteSpace($fileVersion) -and $fileVersion -ne $requested) {
+        Write-Log ('the installed file reports ' + $fileVersion + ' but ' + $requested + ' was expected; publishing the file version')
+    }
+    Set-InstalledVersion $fileVersion
+
     # 4. Launch it. The new build writes the marker once startup really succeeded.
     Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
     $started = Start-Process -FilePath $target -PassThru
@@ -387,6 +477,9 @@ try {
                 if ($lingering) { $lingering | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 600 }
                 Copy-Item -LiteralPath $backup -Destination $target -Force
                 Write-Log 'rolled back to the previous build'
+                # Put the published version back with the binary, or Add or remove programs
+                # would advertise a build that is no longer installed.
+                Set-InstalledVersion (Get-FileVersionString $target)
                 Start-Process -FilePath $target | Out-Null
             }
             catch { Write-Log ('the rollback failed: ' + $_.Exception.Message) }
@@ -402,6 +495,7 @@ catch {
             if ($lingering) { $lingering | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 400 }
             Copy-Item -LiteralPath $backup -Destination $target -Force
             Write-Log 'restored the previous build after a failure'
+            Set-InstalledVersion (Get-FileVersionString $target)
             Start-Process -FilePath $target | Out-Null
         } catch { Write-Log 'could not restore the previous build' }
     }

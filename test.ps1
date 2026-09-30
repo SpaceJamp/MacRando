@@ -49,7 +49,8 @@ $sources = @(
     (Join-Path $root 'src\AdapterKind.cs'),
     (Join-Path $root 'tests\AdapterKindTests.cs'),
     (Join-Path $root 'src\TrayTheme.cs'),
-    (Join-Path $root 'tests\TrayThemeTests.cs')
+    (Join-Path $root 'tests\TrayThemeTests.cs'),
+    (Join-Path $root 'tests\InstalledVersionTests.cs')
 )
 $references = @(
     '/reference:System.dll',
@@ -66,6 +67,10 @@ $references = @(
 if ($LASTEXITCODE -ne 0) {
     throw "Mock test compilation failed with exit code $LASTEXITCODE."
 }
+# The test binary is built into the temp directory, so a check that has to compare the code
+# against a repository file cannot find it by walking up from its own location. The root is
+# handed over here instead.
+$env:MACRANDO_REPO_ROOT = $root
 & $output
 if ($LASTEXITCODE -ne 0) {
     throw "Mock tests failed with exit code $LASTEXITCODE."
