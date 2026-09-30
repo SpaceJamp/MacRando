@@ -285,6 +285,19 @@ Redirects are **not followed** when fetching the manifest or the download. A ser
 
 Updates are checked twice. The manifest URL and download are verified when you run **Check for updates** (SHA-256 plus the Authenticode signer, matched against your expected thumbprint), and then the SHA-256 is **re-verified by the elevated helper immediately before the copy**. That second check exists because the download sits in a per-user temp folder that any program running as you can write to, and the copy happens later in a different process. A download that no longer matches is refused, and the install is abandoned rather than performed.
 
+## Installing
+
+Two forms are published for every release:
+
+- **`MacRando-<version>-setup.exe`** — the installer. Installs to `Program Files`, adds a Start menu entry and uninstaller, and closes a running MacRando first. It offers two optional tasks, both off unless you tick them: trusting the signing certificate for your account, and starting MacRando with Windows.
+- **`MacRando-<version>.zip`** — the portable folder. Unzip and run; nothing is installed.
+
+The installer is per-machine because MacRando already requires administrator to run, so there is no privilege gained by installing per-user, and the executable in `Program Files` is not writable by anything running as your account.
+
+**Uninstalling does not delete your data.** `%LOCALAPPDATA%\MacRando` holds your settings, restore profiles, notification history, and logs, and a restore profile may still describe an adapter that has not been put back. The uninstaller tells you where it left the data and why.
+
+If you chose not to trust the certificate during install, the public certificate and `trust-certificate.ps1` are installed alongside the executable, so you can do it later.
+
 ### Installing an update
 
 **Check for updates** is a single command. It fetches the manifest, downloads a newer release, verifies its SHA-256 hash and Authenticode signer, and then installs and restarts. There is no intermediate step.

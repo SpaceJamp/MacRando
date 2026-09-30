@@ -1,5 +1,34 @@
 # MacRando Changelog
 
+## 1.12.0 - 2026.09
+
+### Added
+
+- **A real installer.** `MacRando-<version>-setup.exe` installs MacRando to Program Files, with Start menu and optional desktop shortcuts, a proper uninstaller, and the license, changelog, README, and the certificate trust script installed alongside the executable.
+- **The installer is signed, not only the executable inside it.** It is the file a user downloads and runs, so an unsigned setup would show Windows' unknown-publisher warning with no publisher at all, which is a worse first impression than the self-signed build it installs.
+- **Per-machine install.** MacRando already requires administrator to run, so there is no privilege argument for a per-user install, and putting the executable in Program Files means it is not writable by anything running as the signed-in user. That removes the class of local tampering where the executable itself is replaced.
+- An optional task offers to **trust the signing certificate for the current user**, which suppresses the unknown-publisher warning. It is off unless explicitly ticked, because adding a certificate to a trusted store is a decision about the machine rather than about the application, and only the current user's store is touched. The public certificate is installed either way, so the included `trust-certificate.ps1` still works for anyone who declines.
+- An optional task registers **Start with Windows** using the same registry key the application writes itself, so the installer's choice and the application's setting cannot disagree. The uninstaller removes that key regardless of how it was added.
+
+### Changed
+
+- The version is no longer written into `installer.iss`. It is passed in from `src\Models.cs`, which is now the single source of truth for every artifact name, so the installer cannot claim a different version from the executable it installs. The previous template sat at 1.4.4 while the application moved on through nine releases; that is not possible now.
+- The `LicenseFile` wizard page is gone. Inno Setup only accepts a `.txt` or `.rtf` there, and the Apache-2.0 text ships verbatim as `LICENSE` rather than being duplicated into a second file that could drift from it.
+- `package.ps1` skips the installer with a clear warning when Inno Setup is not installed, rather than failing, so a contributor without it can still build and package.
+
+### Safety
+
+- **Uninstalling never touches user data.** `%LOCALAPPDATA%\MacRando` holds the restore profiles, and a profile deleted while an adapter is left randomized is the one failure this application is built to avoid. The uninstaller says where the data was left and why it was kept.
+- The installer closes a running MacRando before installing, because the updater swaps the executable and an open file cannot be replaced.
+
+### Fixed
+
+- Several path and directive errors in the installer template that had prevented it from building at all: the file references resolved outside the project, the registry root used the long form where Inno wants `HKCU`, a line beginning with a `#` character was read as a preprocessor directive, and `WizardImageFile` was given an icon where a bitmap is required.
+
+### Tests
+
+- The installer was installed and uninstalled for real, in a throwaway directory, and the results checked: every required file arrives, the installed executable is byte-identical to the packaged one and still carries the expected signature, an unselected certificate task does not touch the trusted store, an unselected startup task does not write the Run key, the uninstaller removes the installation, and the user's data directory survives intact with all 14 of its files.
+
 ## 1.11.1 - 2026.09
 
 ### Security
