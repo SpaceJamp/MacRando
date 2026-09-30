@@ -44,6 +44,21 @@ if (-not $iscc) {
     exit 0
 }
 
+# installer.iss references bin\MacRando.exe and the icons, and Inno Setup refuses to
+# compile when a [Files] source is missing. This test can run before anything has been
+# built, which is the case in both workflows, so the build is done here rather than
+# assumed. Doing it conditionally keeps the common path quick, and building twice is
+# harmless: build.ps1 is idempotent and does not call this script.
+$exe = Join-Path $root 'bin\MacRando.exe'
+if (-not (Test-Path $exe)) {
+    Write-Host '  bin\MacRando.exe is absent, so building before compiling the installer.'
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'build.ps1') | Out-Null
+    if (-not (Test-Path $exe)) {
+        throw ('The installer cannot be compile-tested because bin\MacRando.exe does not exist and ' +
+               'build.ps1 did not produce it. Compiling installer.iss needs the files it installs.')
+    }
+}
+
 $work = Join-Path $env:TEMP ('MacRandoInstallerTest-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 
