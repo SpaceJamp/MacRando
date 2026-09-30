@@ -149,6 +149,7 @@ namespace MacRando
             return string.Empty;
         }
 
+        /// <summary>How many hops to allow. GitHub uses two; five leaves headroom.</summary>
         private const int MaxRedirects = 5;
 
         /// <summary>
@@ -169,14 +170,11 @@ namespace MacRando
         /// the download is checked against both the SHA-256 and the Authenticode signer
         /// named in that manifest, so a hostile redirect cannot yield a payload that
         /// passes both checks.
-        /// </summary>
-        /// <summary>
-        /// Works out where a 3xx points, and refuses it if the hop would leave TLS.
         ///
-        /// Split out from the sending loop so the decision can be tested directly. It used
-        /// to be inline, and the only way to assert anything about it was to run a live
-        /// HTTPS server, which is why the original test asserted a method that no longer
-        /// existed.
+        /// Split from the sending loop so the decision can be tested directly, which is
+        /// the point: the bug being fixed survived three releases behind a test that
+        /// asserted the wrong behaviour, and a test that cannot reach the decision is
+        /// not much of a test.
         /// </summary>
         internal static Uri ResolveRedirect(Uri current, HttpResponseMessage response, string what, int code)
         {
@@ -227,12 +225,23 @@ namespace MacRando
                     return response;
                 }
 
-                Uri next = ResolveRedirect(current, response, what, code);
-                if (hop >= MaxRedirects)
+                Uri next;
+                try
+                {
+                    // Also the hop count, so a long chain cannot spin. A refused hop throws
+                    // from here, which is why the response is disposed in the catch as
+                    // well: letting it go would leak the connection on every refusal.
+                    next = ResolveRedirect(current, response, what, code);
+                    if (hop >= MaxRedirects)
+                    {
+                        throw new InvalidOperationException(
+                            "The " + what + " URL redirected more than " + MaxRedirects + " times.");
+                    }
+                }
+                catch
                 {
                     response.Dispose();
-                    throw new InvalidOperationException(
-                        "The " + what + " URL redirected more than " + MaxRedirects + " times.");
+                    throw;
                 }
 
                 response.Dispose();
