@@ -293,6 +293,14 @@ namespace MacRando
             state.History = NormalizeHistory(state.History);
             state.Notifications = NormalizeNotifications(state.Notifications);
             state.IpChangeHistory = NormalizeIpChangeHistory(state.IpChangeHistory);
+            // Absent in any state file written before 1.13.0, so it is created here rather
+            // than assumed. Normalizing rather than only null-checking also drops entries
+            // that cannot say which adapter they refer to.
+            if (state.KeptMacs == null)
+            {
+                state.KeptMacs = new List<KeptMacRecord>();
+            }
+            KeepChangePolicy.Trim(state);
             return state;
         }
 

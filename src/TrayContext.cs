@@ -211,6 +211,7 @@ namespace MacRando
                 await ManualMacAsync(_form.SelectedAdapter, _form.ManualMacValue);
             _form.RestorePermanentRequested += async (sender, args) =>
                 await RestorePermanentMacAsync(_form.SelectedAdapter);
+            _form.KeepChangeRequested += async (sender, args) => await KeepChangeAsync();
             _form.RandomizeIpRequested += async (sender, args) =>
                 await RandomizeAsync(_form.SelectedAdapter, false, true);
             _form.RestoreRequested += async (sender, args) =>
@@ -646,6 +647,154 @@ namespace MacRando
         {
             int pending = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
             _form.SetPendingRestoreCount(pending);
+            // Only offered when the selected adapter has a keepable MAC change, so the
+            // button is never present for something it cannot do.
+            _form.SetKeepChangeAvailable(pending > 0 && FindKeepableBackup() != null);
+        }
+
+        /// <summary>
+        /// The pending profile for the selected adapter, if keeping it would be allowed.
+        /// </summary>
+        private AdapterBackup FindKeepableBackup()
+        {
+            AdapterInfo adapter = _form.SelectedAdapter;
+            if (adapter == null || _state == null || _state.Backups == null)
+            {
+                return null;
+            }
+            AdapterBackup backup = FindBackup(adapter.Key);
+            if (backup == null)
+            {
+                return null;
+            }
+            string reason;
+            return KeepChangePolicy.CanKeep(backup, out reason) ? backup : null;
+        }
+
+        /// <summary>
+        /// Keeps a changed MAC address instead of restoring it.
+        ///
+        /// This is the one action in MacRando that it cannot undo, so it asks first, states
+        /// plainly what is being given up, and records the original address before the
+        /// profile is discarded. Nothing is restored and no adapter is touched here: the
+        /// change is already applied, and keeping means declining to take it back. If the
+        /// same profile also changed the IP address, that half is still restored, because
+        /// a static address left in place after a reboot breaks connectivity.
+        /// </summary>
+        private async Task KeepChangeAsync()
+        {
+            if (_busy || _confirmationOpen)
+            {
+                return;
+            }
+            if (_restoreStateUnreadable)
+            {
+                ShowError(new InvalidOperationException(
+                    "The saved restore data cannot be read, so this change cannot be kept safely. " +
+                    "Open the restore-data problem details from the tray menu."));
+                return;
+            }
+
+            AdapterBackup backup = FindKeepableBackup();
+            if (backup == null)
+            {
+                RefreshMenus();
+                ShowError(new InvalidOperationException(
+                    "There is no MAC address change to keep for the selected adapter. " +
+                    "Address changes are always restored on exit."));
+                return;
+            }
+
+            string keptAddress = backup.ModifiedMacAddress;
+            bool alsoChangedIp = backup.IpChanged;
+            DialogResult answer = MessageBox.Show(
+                _form,
+                "Keep the changed MAC address on " + backup.DisplayName + "?" + Environment.NewLine +
+                Environment.NewLine +
+                "Current:   " + keptAddress + Environment.NewLine +
+                "Original:  " + backup.OriginalMacAddress + Environment.NewLine +
+                Environment.NewLine +
+                "The change will survive restarting MacRando and rebooting. It will no longer " +
+                "be restored automatically when you exit." + Environment.NewLine + Environment.NewLine +
+                (alsoChangedIp
+                    ? "This change also altered the local IP address. That part will still be " +
+                      "restored on exit, because a static address left in place after a reboot " +
+                      "tends to break connectivity." + Environment.NewLine + Environment.NewLine
+                    : string.Empty) +
+                "The original address is recorded, and Restore original always still works.",
+                "Keep this MAC address?",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes)
+            {
+                return;
+            }
+
+            SetBusy(true);
+            try
+            {
+                AppState stateFile = _stateStore.Load();
+                KeptMacRecord record = KeepChangePolicy.Record(stateFile, backup, keptAddress, DateTime.UtcNow);
+                RemoveBackup(stateFile, backup);
+                if (stateFile.PendingOperation != null &&
+                    string.Equals(stateFile.PendingOperation.AdapterKey, backup.AdapterKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    stateFile.PendingOperation = null;
+                }
+                stateFile.KeptMacs = stateFile.KeptMacs ?? new List<KeptMacRecord>();
+                _stateStore.Save(stateFile);
+                _state = stateFile;
+                _changedAdapterKeysThisSession.Remove(backup.AdapterKey);
+                _startupRandomizeBlocked = false;
+                UpdatePendingRestoreBanner();
+                UpdateFormBackupState();
+                RefreshMenus();
+
+                AppLogger.Info("Kept the changed MAC address: " + KeepChangePolicy.Describe(record));
+                _form.SetStatus("Kept the changed MAC address. It will no longer be restored on exit.");
+                RecordNotification(
+                    "MAC address kept",
+                    "The changed MAC address on " + backup.DisplayName + " was kept instead of restored. " +
+                    "The original address " + AppLogger.MaskMac(backup.OriginalMacAddress) +
+                    " is on record, and Restore original still works.",
+                    NotificationKinds.Success,
+                    backup.AdapterKey,
+                    "Open dashboard",
+                    false,
+                    false,
+                    null);
+                ShowNotification(
+                    "MAC address kept",
+                    backup.DisplayName + " will keep " + keptAddress + " until you restore it yourself.",
+                    ToolTipIcon.Info);
+
+                if (alsoChangedIp)
+                {
+                    await RestoreAsync(backup, false);
+                }
+                else
+                {
+                    try
+                    {
+                        await RefreshAllAsync(true);
+                    }
+                    catch (Exception refreshError)
+                    {
+                        AppLogger.Warning("Refresh after keeping a MAC address failed: " +
+                            AppLogger.Sanitize(refreshError.Message));
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                AppLogger.Error("Could not keep the changed MAC address.", error);
+                ShowError(error);
+            }
+            finally
+            {
+                SetBusy(false);
+            }
         }
 
         /// <summary>

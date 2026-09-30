@@ -157,6 +157,9 @@ namespace MacRando
         private List<AdapterInfo> _allAdapters = new List<AdapterInfo>();
         private List<string> _favoriteKeys = new List<string>();
         private bool _suppressViewEvents;
+        // Not readonly: created by BuildRootLayout, which is a method rather than part of
+        // the constructor, and is not rebuilt on theme changes.
+        private Button _keepChangeButton;
         private readonly Label _selectedTitleLabel;
         private readonly Label _selectedStatusLabel;
         private readonly Label _currentMacLabel;
@@ -190,6 +193,7 @@ namespace MacRando
         public event EventHandler RandomizeMacRequested;
         public event EventHandler ManualMacRequested;
         public event EventHandler RestorePermanentRequested;
+        public event EventHandler KeepChangeRequested;
         public event EventHandler DhcpIpConsentChanged;
         public event EventHandler RandomizeIpRequested;
         public event EventHandler RestoreRequested;
@@ -647,14 +651,27 @@ namespace MacRando
             root.Controls.Add(_headerPanel, 0, 0);
 
             _pendingBanner = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Visible = false, Padding = new Padding(18, 8, 18, 8), Margin = Padding.Empty, Tag = Color.Goldenrod };
-            var bannerLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+            var bannerLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
             bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             _pendingBannerLabel = MakeMutedLabel(string.Empty);
             _pendingBannerLabel.Dock = DockStyle.Fill;
             _pendingBannerLabel.TextAlign = ContentAlignment.MiddleLeft;
             _pendingBannerLabel.Margin = new Padding(0, 0, 12, 0);
+            // Kept separate from Restore, and hidden unless the pending change is a MAC
+            // change, because keeping is the one action here that MacRando cannot undo.
+            _keepChangeButton = MakeButton("Keep change", false, new Size(104, 28));
+            _keepChangeButton.AutoSize = true;
+            _keepChangeButton.Anchor = AnchorStyles.Right;
+            _keepChangeButton.Margin = new Padding(0, 0, 8, 0);
+            _keepChangeButton.Visible = false;
+            _keepChangeButton.Click += (sender, args) => Raise(KeepChangeRequested);
+            _toolTip.SetToolTip(
+                _keepChangeButton,
+                "Leave the changed MAC address in place instead of restoring it on exit. " +
+                "The original address is recorded so you can still get back to it.");
             var restoreAllButton = MakeButton("Restore all", false, new Size(96, 28));
             restoreAllButton.AutoSize = true;
             restoreAllButton.Anchor = AnchorStyles.Right;
@@ -672,8 +689,9 @@ namespace MacRando
             bannerDismissButton.Click += (sender, args) => _pendingBanner.Visible = false;
             _toolTip.SetToolTip(bannerDismissButton, "Hide this banner for the current session. The tray menu can still restore pending profiles.");
             bannerLayout.Controls.Add(_pendingBannerLabel, 0, 0);
-            bannerLayout.Controls.Add(restoreAllButton, 1, 0);
-            bannerLayout.Controls.Add(bannerDismissButton, 2, 0);
+            bannerLayout.Controls.Add(_keepChangeButton, 1, 0);
+            bannerLayout.Controls.Add(restoreAllButton, 2, 0);
+            bannerLayout.Controls.Add(bannerDismissButton, 3, 0);
             _pendingBanner.Controls.Add(bannerLayout);
             root.Controls.Add(_pendingBanner, 0, 1);
 
@@ -684,6 +702,19 @@ namespace MacRando
             body.Controls.Add(_detailsPanel, 1, 0);
             root.Controls.Add(body, 0, 2);
             Controls.Add(root);
+        }
+
+        /// <summary>
+        /// Says whether the pending change could be kept rather than restored. Called
+        /// separately from the count so the button appears only when there is something it
+        /// can actually do, and never for a change that is only an address change.
+        /// </summary>
+        public void SetKeepChangeAvailable(bool available)
+        {
+            if (_keepChangeButton != null)
+            {
+                _keepChangeButton.Visible = available;
+            }
         }
 
         public void SetPendingRestoreCount(int count)
@@ -702,7 +733,9 @@ namespace MacRando
                 // until a restore is outstanding, so this has to be re-run as it appears.
                 NameOnDemandButtons(_pendingBanner, "Restore all", "Restore all pending adapters",
                     "Restores every adapter that still has a pending restore profile.", true);
-                NameOnDemandButtons(_pendingBanner, "Dismiss", "Dismiss the pending restore banner",
+                NameOnDemandButtons(_pendingBanner, "Keep change", "Keep the changed MAC address",
+                    "Leaves the changed MAC address in place instead of restoring it on exit. " +
+                    "The original address is recorded so you can still get back to it.", true);                NameOnDemandButtons(_pendingBanner, "Dismiss", "Dismiss the pending restore banner",
                     "Hides this banner. The pending changes are not affected.", true);
                 Accessibility.Describe(_pendingBannerLabel, "Pending restore summary", AccessibleRole.Text,
                     count == 1
@@ -722,6 +755,12 @@ namespace MacRando
         /// </summary>
         private void ApplyHeaderAccessibility()
         {
+            // Named here rather than with the on-demand banner buttons, because this one is
+            // hidden until a keepable change exists, so a naming pass driven by the banner
+            // appearing would leave it unlabelled in the state where it first shows.
+            Accessibility.Describe(_keepChangeButton, "Keep the changed MAC address", AccessibleRole.PushButton,
+                "Leaves the changed MAC address in place instead of restoring it on exit. " +
+                "The original address is recorded so you can still get back to it.");
             Accessibility.Describe(_headerPublicIpLabel, "Public IP address", AccessibleRole.Text,
                 "The public IP address seen by websites from this machine.");
             Accessibility.Describe(_titleLabel, "MacRando", AccessibleRole.Text,

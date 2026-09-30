@@ -248,6 +248,11 @@ internal static class NetworkServiceMockTests
             {
                 return updateTrustResult;
             }
+            int keepChangeResult = KeepChangeTests.Run();
+            if (keepChangeResult != 0)
+            {
+                return keepChangeResult;
+            }
             return 0;
         }
         catch (Exception error)

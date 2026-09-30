@@ -143,7 +143,7 @@ namespace MacRando
     internal static class AppInfo
     {
         public const string ProductName = "MacRando";
-        public const string Version = "1.12.0";
+        public const string Version = "1.13.0";
         public const string BuildLabel = "2026.09";
         public static string DisplayVersion { get { return Version + " (" + BuildLabel + ")"; } }
     }
@@ -435,6 +435,27 @@ namespace MacRando
         public UpdateManifest Manifest { get; set; }
     }
 
+    /// <summary>
+    /// A MAC address the user chose to keep instead of restoring.
+    ///
+    /// The point of this record is that "keep" must not mean "forget". A kept address is
+    /// permanent as far as MacRando's automatic restore is concerned, so the original
+    /// hardware address has to remain available somewhere, or the user loses the ability
+    /// to get back without leaving the application. This is a history record, not a
+    /// pending profile: nothing acts on it automatically.
+    /// </summary>
+    internal sealed class KeptMacRecord
+    {
+        public string AdapterKey { get; set; }
+        public string AdapterName { get; set; }
+        public string InterfaceGuid { get; set; }
+        /// <summary>The hardware address, so it can be put back at any time.</summary>
+        public string OriginalMacAddress { get; set; }
+        /// <summary>The address that was kept, so the user can see what they chose.</summary>
+        public string KeptMacAddress { get; set; }
+        public DateTime KeptAtUtc { get; set; }
+    }
+
     internal sealed class AppState
     {
         public int SchemaVersion { get; set; }
@@ -444,6 +465,8 @@ namespace MacRando
         public List<OperationHistoryEntry> History { get; set; }
         public List<NotificationHistoryEntry> Notifications { get; set; }
         public List<IpChangeRecord> IpChangeHistory { get; set; }
+        /// <summary>MAC addresses kept on purpose, newest last. Capped on load.</summary>
+        public List<KeptMacRecord> KeptMacs { get; set; }
 
         public AppState()
         {
@@ -453,6 +476,7 @@ namespace MacRando
             History = new List<OperationHistoryEntry>();
             Notifications = new List<NotificationHistoryEntry>();
             IpChangeHistory = new List<IpChangeRecord>();
+            KeptMacs = new List<KeptMacRecord>();
         }
     }
 }

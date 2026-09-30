@@ -157,6 +157,21 @@ The **status line** is the one piece of text that needs no click to be useful, s
 
 The same information appears in the tray tooltip, which is often the only MacRando text visible at all.
 
+## Keeping a changed MAC address
+
+By default nothing is permanent. Every change MacRando makes is saved with a restore profile and put back when you exit, and that is the behaviour you get unless you ask for otherwise.
+
+If you want a changed address to **stay**, the pending-restore banner offers **Keep change** whenever the selected adapter has a MAC change that can be kept. It asks first, showing both the current and the original address, and defaults to No.
+
+What keeping does:
+
+- The change survives closing MacRando and rebooting, and is no longer restored on exit.
+- **The original address is recorded** in the state file, so you can still get back to it from inside MacRando. Keeping is not the same as forgetting. **Restore original** also continues to work, because it reads the adapter's own stored value rather than a saved profile.
+- Only the MAC address is affected. **An IP change is always restored**, because a static address left in place after a reboot tends to break connectivity. If one operation changed both, the confirmation says the IP half will still be restored.
+- Keeping is refused while the restore data is unreadable, since the point of recording the original is that it can be trusted.
+
+There is no global setting to turn off automatic restore. That is deliberate: it would remove the guarantee the application is built around for the sake of one case, and keeping is available per change instead.
+
 ## Recovery after a crash or forced termination
 
 If MacRando is killed, crashes, or loses power mid-change, the saved restore profile survives. Recover with either of these:
@@ -430,6 +445,7 @@ Unless required by applicable law or agreed to in writing, the software is provi
 - `src/Accessibility.cs` — accessible names, roles, and the high-contrast palette.
 - `src/TrayMenuState.cs` — the tray menu's status wording, colour, and tooltip.
 - `src/UpdateTrust.cs` — DPAPI protection for the update manifest URL and signer thumbprint.
+- `src/KeepChangePolicy.cs` — when a changed MAC address may be kept rather than restored.
 - `src/TrayContext.cs` — tray menu and operation workflow.
 - `src/NotificationPopup.cs` — non-activating in-app notifications with the application icon.
 - `src/NotificationCenterForm.cs` — searchable notification history and notification preferences.

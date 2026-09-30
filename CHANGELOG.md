@@ -1,5 +1,24 @@
 # MacRando Changelog
 
+## 1.13.0 - 2026.09
+
+### Added
+
+- **A changed MAC address can now be kept instead of restored.** A **Keep change** button appears on the pending-restore banner whenever the selected adapter has a MAC change that can be kept. MacRando is built so everything is reversible, which left no way to say "yes, leave that one", and the only way to get a permanent address was to make the change outside the app with no record of the original.
+- **Keeping is entirely optional and per-change.** The default is unchanged: exiting still restores, and nothing becomes permanent unless you press the button. There is deliberately no global switch that disables automatic restore, because that would remove the guarantee the application is built around for the sake of one case.
+- **The original address is recorded before the profile is discarded.** `KeptMacRecords` in the state file holds the hardware address alongside the one that was kept, capped at 50 entries, newest first. Keeping therefore does not mean forgetting: the way back stays available inside MacRando, and **Restore original** continues to work because it reads the driver's stored value rather than a profile.
+- **Keeping applies to the MAC address only.** An IP change left in place after a reboot tends to break connectivity, so those are always restored. If one operation changed both, keeping the MAC half is allowed and the IP half is still restored, which the confirmation says before anything happens.
+- The confirmation shows both the current and original address, states that the change will survive restarts and reboots, defaults to **No**, and is refused outright while the restore data is unreadable.
+
+### Fixed
+
+- The Keep button was left without an accessible name. It is hidden until a keepable change exists, so the pass that names the banner's on-demand buttons never reached it, and it would have appeared unlabelled in exactly the state where it first becomes visible. Caught by the accessibility test walking the live control tree in both banner states.
+
+### Tests
+
+- Thirty-three assertions covering the refusals rather than the happy path, because keeping is the one action MacRando cannot undo. Covered: a profile with no changes, an IP-only change, a profile that does not record which address was applied, a profile that does not record the original (which would make keeping a one-way door with no record), and a missing profile. Each asserts the refusal explains itself, since a silent refusal is worse than a visible one.
+- The record is asserted to hold the original, to stay one entry per adapter across repeated keeps, to survive a second keep of the same adapter, to be capped with the newest kept and the oldest dropped, and to tolerate null entries from a hand-edited state file.
+
 ## 1.12.0 - 2026.09
 
 ### Added
