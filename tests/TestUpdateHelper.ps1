@@ -88,7 +88,9 @@ internal static class ExtractHelper
             [int]$WatchdogMs,
             [string]$Healthy,
             [string]$NoMarker,
-            [int]$DelayMs
+            [int]$DelayMs,
+            [string]$ExpectedHash,
+            [switch]$TamperSource
         )
         $caseDir = Join-Path $work $Label
         New-Item -ItemType Directory -Force -Path $caseDir | Out-Null
@@ -102,6 +104,20 @@ internal static class ExtractHelper
         [System.IO.File]::WriteAllBytes($target, [byte[]](1, 2, 3, 4, 5))
         Copy-Item $stub $source -Force
 
+        # The hash is taken before any tampering, mirroring the real sequence: the main
+        # process verifies the download, then something else replaces it, then the
+        # elevated helper runs. A literal sentinel is used for the case that supplies no
+        # hash, because an empty argument would otherwise be indistinguishable from
+        # "not supplied" and would be silently filled in here.
+        if (-not $PSBoundParameters.ContainsKey('ExpectedHash')) {
+            $ExpectedHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        }
+        if ($TamperSource) {
+            # A stand-in for another process running as the same user, writing to the
+            # per-user temp folder between verification and install.
+            [System.IO.File]::WriteAllBytes($source, [byte[]](0x4D, 0x5A, 0x90, 0x00, 0xDE, 0xAD, 0xBE, 0xEF))
+        }
+
         $env:MACRANDO_TARGET = $target
         $env:MACRANDO_SOURCE = $source
         $env:MACRANDO_BACKUP = $backup
@@ -110,6 +126,7 @@ internal static class ExtractHelper
         $env:MACRANDO_WATCHDOG_MS = "$WatchdogMs"
         $env:MACRANDO_EXIT_WAIT_MS = '5000'
         $env:MACRANDO_LOG = $log
+        $env:MACRANDO_SHA256 = $ExpectedHash
         $env:MACRANDO_STUB_HEALTHY = $Healthy
         $env:MACRANDO_STUB_NO_MARKER = $NoMarker
         $env:MACRANDO_STUB_DELAY_MS = "$DelayMs"
@@ -146,6 +163,19 @@ internal static class ExtractHelper
     $crash = Invoke-Case -Label 'crash' -WatchdogMs 20000 -Healthy '0' -NoMarker '0' -DelayMs 50
     $slow = Invoke-Case -Label 'slow' -WatchdogMs 3000 -Healthy '1' -NoMarker '1' -DelayMs 50
 
+    # The case this hardening exists for. The download is verified in the main process,
+    # then replaced by something else in the per-user temp folder, and only then does the
+    # elevated helper run. The target must be left exactly as it was.
+    $tampered = Invoke-Case -Label 'tampered' -WatchdogMs 20000 -Healthy '1' -NoMarker '0' -DelayMs 50 -TamperSource
+    $tamperedBytes = [System.IO.File]::ReadAllBytes((Join-Path $work 'tampered\Target.exe'))
+    $tamperedUntouched = ($tamperedBytes.Length -eq 5 -and $tamperedBytes[0] -eq 1)
+
+    # A missing hash must also refuse, or the check could be skipped by simply not
+    # supplying one.
+    $noHash = Invoke-Case -Label 'nohash' -WatchdogMs 20000 -Healthy '1' -NoMarker '0' -DelayMs 50 -ExpectedHash ' '
+    $noHashBytes = [System.IO.File]::ReadAllBytes((Join-Path $work 'nohash\Target.exe'))
+    $noHashUntouched = ($noHashBytes.Length -eq 5 -and $noHashBytes[0] -eq 1)
+
     Write-Host ''
     Write-Host '=== assertions ==='
 
@@ -167,6 +197,35 @@ internal static class ExtractHelper
         $failures++
     }
     else { Write-Host 'PASS: the helper cleans itself up' }
+
+    # The security case: a download replaced after verification must never be installed.
+    if (-not $tamperedUntouched) {
+        Write-Host 'FAIL: a download that no longer matches the verified hash was installed'
+        $failures++
+    }
+    else { Write-Host 'PASS: a download replaced after verification is refused' }
+
+    $tamperedLog = Join-Path $work 'tampered\helper.log'
+    if (Test-Path $tamperedLog) {
+        $tamperedText = Get-Content -Raw $tamperedLog
+        if ($tamperedText -match 'no longer matches the verified hash') {
+            Write-Host 'PASS: the refusal names the hash mismatch as the reason'
+        }
+        else {
+            Write-Host 'FAIL: the refusal did not record why it refused'
+            $failures++
+        }
+    }
+    else {
+        Write-Host 'FAIL: the tampered case produced no log'
+        $failures++
+    }
+
+    if (-not $noHashUntouched) {
+        Write-Host 'FAIL: an install was allowed with no expected hash supplied'
+        $failures++
+    }
+    else { Write-Host 'PASS: an install with no expected hash is refused' }
 }
 finally {
     Get-Process -Name 'UpdaterHelperStub' -ErrorAction SilentlyContinue |
@@ -174,6 +233,7 @@ finally {
     try { Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue } catch { }
     foreach ($name in @('MACRANDO_TARGET', 'MACRANDO_SOURCE', 'MACRANDO_BACKUP', 'MACRANDO_MARKER',
                         'MACRANDO_PID', 'MACRANDO_WATCHDOG_MS', 'MACRANDO_EXIT_WAIT_MS', 'MACRANDO_LOG',
+                        'MACRANDO_SHA256',
                         'MACRANDO_STUB_HEALTHY', 'MACRANDO_STUB_NO_MARKER', 'MACRANDO_STUB_DELAY_MS')) {
         Remove-Item "Env:$name" -ErrorAction SilentlyContinue
     }

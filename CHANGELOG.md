@@ -1,5 +1,19 @@
 # MacRando Changelog
 
+## 1.11.1 - 2026.09
+
+### Security
+
+- **A verified update is re-verified immediately before it is installed.** The download sits in `%TEMP%\MacRando\updates`, a per-user folder that any process running as the same user can write to, and the verification happened in the main process while the copy is performed later by an elevated helper. Anything running as you could replace the file in that window, and the helper would copy whatever it found into the elevated install target. The SHA-256 is now recomputed in the helper, as close to the copy as possible, and the install is refused on a mismatch.
+- The hash is passed to the helper through `MACRANDO_SHA256` alongside the other paths, and a missing hash is a refusal rather than a skip, so the check cannot be bypassed by simply not supplying one.
+- `CanInstall` performs the same re-check when the install is authorised, so a file that has already been replaced is reported as changed rather than discovered to be bad after the user has committed to restarting.
+- The comparison is against the hash the manifest recorded, which is the value that was verified against those exact bytes. A file replaced with something signed by a different key is still refused.
+
+### Tests
+
+- Two new end-to-end cases in the updater test, which run the real helper script against a stub. One replaces the verified download with different bytes after the hash was taken and confirms the target executable is left byte-for-byte untouched and the log names the hash mismatch as the reason. The other supplies no hash and confirms the install is refused.
+- Three assertions added to the install guard, including that the refusal explains the download changed rather than reporting a generic failure.
+
 ## 1.11.0 - 2026.09
 
 ### Security

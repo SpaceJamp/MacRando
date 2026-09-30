@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Windows.Forms;
 
@@ -80,6 +81,47 @@ namespace MacRando
             }
         }
 
+        /// <summary>
+        /// Re-checks the downloaded file against the hash recorded when it was verified.
+        ///
+        /// Deliberately compares the hash only, not the signature. The Authenticode check
+        /// is comparatively slow and needs the certificate chain, and the hash is the
+        /// stronger of the two for this purpose: it is the thing that was verified against
+        /// these exact bytes, and a swapped file will not match it. A file that has been
+        /// replaced with something else signed by a different key would still be caught,
+        /// because the manifest's hash describes the one file that was approved.
+        /// </summary>
+        public static bool StillMatchesVerifiedHash(UpdateCheckResult result)
+        {
+            if (result == null || result.Manifest == null ||
+                string.IsNullOrWhiteSpace(result.Manifest.Sha256) ||
+                string.IsNullOrWhiteSpace(result.LocalDownloadPath) ||
+                !File.Exists(result.LocalDownloadPath))
+            {
+                return false;
+            }
+            try
+            {
+                string actual;
+                using (SHA256 sha = SHA256.Create())
+                using (FileStream stream = new FileStream(
+                    result.LocalDownloadPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    actual = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", string.Empty);
+                }
+                return string.Equals(actual, result.Manifest.Sha256.Trim(), StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception error)
+            {
+                // A file that cannot be read is treated as not matching. Refusing to
+                // install is the safe direction: the alternative is installing a file
+                // nobody was able to check.
+                AppLogger.Warning("Could not re-verify the downloaded update: " +
+                    AppLogger.Sanitize(error.Message));
+                return false;
+            }
+        }
+
         public static bool CanInstall(
             UpdateCheckResult result,
             int pendingRestoreCount,
@@ -102,6 +144,19 @@ namespace MacRando
                 reason = "The verified download is no longer on disk. Run Check for updates again.";
                 return false;
             }
+            // The download sits in a per-user temp folder between verification and install,
+            // which is a gap an unprivileged process running as this user can write to. The
+            // hash is compared again here so the install decision is made against the bytes
+            // on disk now, not against the bytes that were verified earlier. The helper
+            // repeats this check immediately before the copy, because CanInstall returning
+            // true is not the same moment as the file being installed.
+            if (!StillMatchesVerifiedHash(result))
+            {
+                reason = "The downloaded file has changed since it was verified. " +
+                    "This can happen if another program is modifying the temp folder. " +
+                    "Run Check for updates again.";
+                return false;
+            }
             if (pendingRestoreCount > 0)
             {
                 reason = "Restore the pending adapter profiles before installing an update. "
@@ -116,6 +171,12 @@ namespace MacRando
             if (result.Manifest == null || string.IsNullOrWhiteSpace(result.Manifest.Version))
             {
                 reason = "The update manifest did not report a version.";
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(result.Manifest.Sha256))
+            {
+                reason = "The update manifest did not report a SHA-256 hash, so the download " +
+                    "cannot be re-verified at install time.";
                 return false;
             }
             Version manifestVersion;
@@ -181,6 +242,9 @@ namespace MacRando
             startInfo.EnvironmentVariables["MACRANDO_WATCHDOG_MS"] = (watchdogSeconds * 1000).ToString(CultureInfo.InvariantCulture);
             startInfo.EnvironmentVariables["MACRANDO_EXIT_WAIT_MS"] = (exitWaitSeconds * 1000).ToString(CultureInfo.InvariantCulture);
             startInfo.EnvironmentVariables["MACRANDO_LOG"] = logPath;
+            // The hash the download was verified against, so the helper can re-check it at
+            // the moment of the copy rather than trusting the main process's earlier check.
+            startInfo.EnvironmentVariables["MACRANDO_SHA256"] = result.Manifest.Sha256;
 
             // The helper inherits elevation from this process, so it can replace the
             // executable even when MacRando is installed under Program Files.
@@ -251,7 +315,40 @@ try {
     Copy-Item -LiteralPath $target -Destination $backup -Force
     Write-Log ('backed up the current build to ' + $backup)
 
-    # 3. Swap in the verified download.
+    # 3. Re-verify, then swap in the download.
+    #
+    # The download lives in a per-user temp folder and is checked in the main process, but
+    # this script runs later, from an elevated helper. Anything running as the same user can
+    # replace the file in between. The hash is recomputed here, as close to the copy as
+    # possible, and the copy is refused if it does not match. Installing a file nobody was
+    # able to check is the one outcome worth being strict about, so an unreadable file is
+    # also treated as a failure rather than waved through.
+    $expectedHash = $env:MACRANDO_SHA256
+    if ([string]::IsNullOrWhiteSpace($expectedHash)) {
+        Write-Log 'refusing to install: no expected hash was supplied'
+        Remove-Self
+        exit 2
+    }
+    if (-not (Test-Path -LiteralPath $source)) {
+        Write-Log 'refusing to install: the download is no longer on disk'
+        Remove-Self
+        exit 2
+    }
+    $actualHash = $null
+    try {
+        $actualHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+    } catch {
+        Write-Log ('refusing to install: the download could not be read (' + $_.Exception.Message + ')')
+        Remove-Self
+        exit 2
+    }
+    if ($actualHash -ne $expectedHash.Trim().ToUpperInvariant()) {
+        Write-Log 'refusing to install: the download no longer matches the verified hash'
+        Remove-Self
+        exit 2
+    }
+    Write-Log 're-verified the download immediately before installing'
+
     Copy-Item -LiteralPath $source -Destination $target -Force
     Write-Log 'installed the new build'
 

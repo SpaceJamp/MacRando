@@ -253,7 +253,10 @@ internal static class UpgradeRegressionChecks
                 {
                     Version = "9.9.9",
                     DownloadUrl = "https://example.invalid/MacRando-9.9.9.exe",
-                    Sha256 = new string('A', 64),
+                    // The real hash of the file, because the install guard now re-verifies
+                    // the download on disk rather than trusting the earlier check. Without
+                    // this every case here would refuse for the wrong reason.
+                    Sha256 = Sha256Of(verifiedFile),
                     SignerThumbprint = new string('B', 40)
                 }
             };
@@ -326,13 +329,39 @@ internal static class UpgradeRegressionChecks
                 }
             };
             string reason;
+            // The hash must be the real one for the file, because CanInstall now
+            // re-verifies the download on disk rather than trusting the earlier check.
+            verified.Manifest.Sha256 = Sha256Of(verifiedFile);
             Check(MacRando.UpdateInstaller.CanInstall(verified, 0, false, "2.0.0", out reason),
                 "a verified newer build with no pending restore should be installable, got: " + reason);
             Check(string.IsNullOrEmpty(reason), "an allowed install should not report a refusal reason");
+
+            // And the case the re-check exists for: the file on disk no longer matches the
+            // hash that was verified, which is what an unprivileged process replacing it in
+            // the temp folder looks like.
+            File.WriteAllBytes(verifiedFile, new byte[] { 77, 90, 90, 0, 0, 0, 1, 2, 3, 4 });
+            Check(!MacRando.UpdateInstaller.CanInstall(verified, 0, false, "2.0.0", out reason),
+                "an install must be refused once the download no longer matches the verified hash");
+            Check(reason.IndexOf("changed", StringComparison.OrdinalIgnoreCase) >= 0,
+                "the refusal should say the download changed, got: " + reason);
+
+            // A manifest with no hash cannot be re-verified, so it must not be installable.
+            File.WriteAllBytes(verifiedFile, new byte[] { 77, 90, 90, 0, 0, 0 });
+            verified.Manifest.Sha256 = string.Empty;
+            Check(!MacRando.UpdateInstaller.CanInstall(verified, 0, false, "2.0.0", out reason),
+                "an install must be refused when the manifest carries no hash to re-verify against");
         }
         finally
         {
             try { File.Delete(verifiedFile); } catch { }
+        }
+    }
+
+    private static string Sha256Of(string path)
+    {
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+        {
+            return BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(path))).Replace("-", string.Empty);
         }
     }
 

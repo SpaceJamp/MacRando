@@ -283,6 +283,8 @@ Upgrading from an earlier version is automatic. A plaintext settings file is sti
 
 Redirects are **not followed** when fetching the manifest or the download. A server answering `https` with a redirect to `http` would otherwise downgrade the transfer after the scheme check had already passed, so any 3xx is treated as a failure and the status is shown. If you point the manifest URL at a link shortener, you will be told rather than silently redirected.
 
+Updates are checked twice. The manifest URL and download are verified when you run **Check for updates** (SHA-256 plus the Authenticode signer, matched against your expected thumbprint), and then the SHA-256 is **re-verified by the elevated helper immediately before the copy**. That second check exists because the download sits in a per-user temp folder that any program running as you can write to, and the copy happens later in a different process. A download that no longer matches is refused, and the install is abandoned rather than performed.
+
 ### Installing an update
 
 **Check for updates** is a single command. It fetches the manifest, downloads a newer release, verifies its SHA-256 hash and Authenticode signer, and then installs and restarts. There is no intermediate step.
