@@ -71,6 +71,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "Mock tests failed with exit code $LASTEXITCODE."
 }
 
+# Release notes are extracted from the changelog and must cover only the version being
+# released. A body containing every version still looks like a plausible release page, so
+# nothing would report it, which is exactly what happened.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tests\ReleaseNotesTests.ps1')
+if ($LASTEXITCODE -ne 0) {
+    throw "Release notes test failed with exit code $LASTEXITCODE."
+}
+
 # The combined network snapshot is timed against the two-launch path it replaced, so the
 # change that halves the process launches per refresh cannot silently become a regression.
 # Read-only: every variant only queries.
