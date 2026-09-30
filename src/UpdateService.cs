@@ -41,7 +41,7 @@ namespace MacRando
 
             try
             {
-                string manifestJson = await Client.GetStringAsync(manifestUri);
+                string manifestJson = await ReadAllTextStrict(manifestUri);
                 UpdateManifest manifest = new JavaScriptSerializer().Deserialize<UpdateManifest>(manifestJson);
                 string validationError = ValidateManifest(manifest);
                 if (!string.IsNullOrWhiteSpace(validationError))
@@ -80,7 +80,7 @@ namespace MacRando
                 Directory.CreateDirectory(downloadDirectory);
                 string fileName = "MacRando-" + manifest.Version + ".exe";
                 string destinationPath = Path.Combine(downloadDirectory, fileName);
-                byte[] payload = await Client.GetByteArrayAsync(downloadUri);
+                byte[] payload = await ReadAllBytesStrict(downloadUri);
                 File.WriteAllBytes(destinationPath, payload);
 
                 string actualHash;
@@ -149,10 +149,68 @@ namespace MacRando
             return string.Empty;
         }
 
+        /// <summary>
+        /// A 3xx is treated as a failure rather than followed. The redirect status is
+        /// named in the message so a user pointing the manifest at a shortener or a
+        /// tracking link is told what happened instead of getting a bare network error.
+        /// </summary>
+        private static void RejectRedirect(HttpResponseMessage response, string what)
+        {
+            int code = (int)response.StatusCode;
+            if (code < 300 || code >= 400)
+            {
+                return;
+            }
+            throw new InvalidOperationException(
+                "The " + what + " URL redirected (HTTP " + code + "). Redirects are not followed, " +
+                "because a redirect could downgrade the connection to plain HTTP. " +
+                "Set the manifest URL to the final address.");
+        }
+
+        private static async Task<string> ReadAllTextStrict(Uri uri)
+        {
+            using (HttpResponseMessage response = await Client.GetAsync(uri))
+            {
+                RejectRedirect(response, "update manifest");
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new InvalidOperationException(
+                        "The update manifest request failed with HTTP " + (int)response.StatusCode + ".");
+                }
+                return await response.Content.ReadAsStringAsync();
+            }
+        }
+
+        private static async Task<byte[]> ReadAllBytesStrict(Uri uri)
+        {
+            using (HttpResponseMessage response = await Client.GetAsync(uri))
+            {
+                RejectRedirect(response, "update download");
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new InvalidOperationException(
+                        "The update download failed with HTTP " + (int)response.StatusCode + ".");
+                }
+                return await response.Content.ReadAsByteArrayAsync();
+            }
+        }
+
         private static HttpClient CreateClient()
         {
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-            HttpClient client = new HttpClient();
+            // Redirects are refused rather than followed. The manifest and the download
+            // are each checked for an https scheme before the request is made, but a
+            // server answering 302 with an http:// location would otherwise downgrade the
+            // transfer after that check had already passed, which is exactly the position
+            // an active network attacker wants. The refusal lives on the handler because
+            // HttpClient itself only exposes automatic redirection as a boolean, and
+            // disabling it globally on ServicePointManager would change behaviour for
+            // every other request in the process.
+            var handler = new HttpClientHandler
+            {
+                AllowAutoRedirect = false
+            };
+            HttpClient client = new HttpClient(handler, true);
             client.Timeout = TimeSpan.FromSeconds(12);
             client.DefaultRequestHeaders.UserAgent.ParseAdd(AppInfo.ProductName + "/" + AppInfo.Version);
             // A cached manifest can hide a release published moments ago, which would leave

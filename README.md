@@ -277,6 +277,12 @@ The tray menu includes **Check for updates**. Configure an HTTPS update manifest
 %LOCALAPPDATA%\MacRando\updates-latest.txt
 ```
 
+The manifest URL and the expected signer thumbprint are stored **encrypted** in `settings.json.trust`, DPAPI-protected against your Windows user account. They are the trust anchor for code execution, because MacRando runs as administrator, so anything that could rewrite them could point an update at a server of its own choosing. The remaining preferences stay in plain text: they have no security consequence and should be readable when you are trying to work out why something is misbehaving.
+
+Upgrading from an earlier version is automatic. A plaintext settings file is still honoured on load and the two values move into the encrypted file the next time MacRando saves its settings.
+
+Redirects are **not followed** when fetching the manifest or the download. A server answering `https` with a redirect to `http` would otherwise downgrade the transfer after the scheme check had already passed, so any 3xx is treated as a failure and the status is shown. If you point the manifest URL at a link shortener, you will be told rather than silently redirected.
+
 ### Installing an update
 
 **Check for updates** is a single command. It fetches the manifest, downloads a newer release, verifies its SHA-256 hash and Authenticode signer, and then installs and restarts. There is no intermediate step.
@@ -408,6 +414,7 @@ Unless required by applicable law or agreed to in writing, the software is provi
 - `src/RetentionPolicy.cs` — bounded on-disk footprint for rotated logs and diagnostic bundles.
 - `src/Accessibility.cs` — accessible names, roles, and the high-contrast palette.
 - `src/TrayMenuState.cs` — the tray menu's status wording, colour, and tooltip.
+- `src/UpdateTrust.cs` — DPAPI protection for the update manifest URL and signer thumbprint.
 - `src/TrayContext.cs` — tray menu and operation workflow.
 - `src/NotificationPopup.cs` — non-activating in-app notifications with the application icon.
 - `src/NotificationCenterForm.cs` — searchable notification history and notification preferences.

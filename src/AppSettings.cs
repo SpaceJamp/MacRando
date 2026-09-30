@@ -85,6 +85,7 @@ namespace MacRando
     internal sealed class AppSettingsStore
     {
         private readonly string _settingsPath;
+        private readonly string _updateTrustPath;
         private readonly object _sync = new object();
 
         public AppSettingsStore()
@@ -102,11 +103,21 @@ namespace MacRando
                 throw new ArgumentNullException("settingsPath");
             }
             _settingsPath = settingsPath;
+            _updateTrustPath = settingsPath + ".trust";
         }
 
         public string SettingsPath
         {
             get { return _settingsPath; }
+        }
+
+        /// <summary>
+        /// Where the encrypted trust values live. Named after the settings file so a user
+        /// who deletes one to start clean removes both, which is the desired outcome.
+        /// </summary>
+        public string UpdateTrustPath
+        {
+            get { return _updateTrustPath; }
         }
 
         public AppSettings Load()
@@ -115,17 +126,69 @@ namespace MacRando
             {
                 try
                 {
+                    // The trust file is read first and independently, because a user who
+                    // deletes the plain settings file to start clean has not asked to
+                    // discard where updates come from, and losing that silently disables
+                    // update checks with no visible cause.
+                    UpdateTrustPayload trust = ReadUpdateTrust();
                     if (!File.Exists(_settingsPath))
                     {
-                        return new AppSettings();
+                        AppSettings fresh = new AppSettings();
+                        if (trust != null)
+                        {
+                            fresh.UpdateManifestUrl = trust.UpdateManifestUrl ?? string.Empty;
+                            fresh.ExpectedSignerThumbprint = trust.ExpectedSignerThumbprint ?? string.Empty;
+                        }
+                        return fresh;
                     }
                     AppSettings settings = new JavaScriptSerializer().Deserialize<AppSettings>(File.ReadAllText(_settingsPath, Encoding.UTF8));
-                    return Normalize(settings);
+                    Normalize(settings);
+                    if (trust != null)
+                    {
+                        settings.UpdateManifestUrl = trust.UpdateManifestUrl ?? string.Empty;
+                        settings.ExpectedSignerThumbprint = trust.ExpectedSignerThumbprint ?? string.Empty;
+                    }
+                    return settings;
                 }
                 catch
                 {
                     return new AppSettings();
                 }
+            }
+        }
+
+        /// <summary>
+        /// Overlays the encrypted trust file onto the loaded settings.
+        ///
+        /// The trust file wins over settings.json, because that is where the values live
+        /// now. A settings.json that still carries them is a pre-1.11 file, and its values
+        /// are migrated on the next save; until then they are honoured so an upgrade does
+        /// not silently disable update checks for someone who had configured them.
+        /// </summary>
+        private UpdateTrustPayload ReadUpdateTrust()
+        {
+            if (!File.Exists(UpdateTrustPath))
+            {
+                return null;
+            }
+            try
+            {
+                UpdateTrustPayload payload = UpdateTrustEnvelope.Unprotect(
+                    File.ReadAllText(UpdateTrustPath, Encoding.UTF8));
+                if (payload == null)
+                {
+                    // Worth saying out loud: update checks keep working from any values
+                    // left in the plain file, but a user who edited the trust file by
+                    // hand should know it is not being honoured.
+                    AppLogger.Warning("The encrypted update trust file could not be read; " +
+                        "falling back to any values in settings.json.");
+                }
+                return payload;
+            }
+            catch (Exception error)
+            {
+                AppLogger.Error("Could not read the encrypted update trust file.", error);
+                return null;
             }
         }
 
@@ -177,15 +240,69 @@ namespace MacRando
                 string directory = Path.GetDirectoryName(_settingsPath);
                 Directory.CreateDirectory(directory);
                 string temporaryPath = _settingsPath + ".tmp";
+
+                // The two trust values are removed before the preferences are written, so
+                // the clear text file never holds them again once this has run once.
+                bool hadTrust = !string.IsNullOrWhiteSpace(settings.UpdateManifestUrl) ||
+                    !string.IsNullOrWhiteSpace(settings.ExpectedSignerThumbprint);
+                AppSettings preferences = new AppSettings
+                {
+                    StartMinimized = settings.StartMinimized,
+                    StartWithWindows = settings.StartWithWindows,
+                    AutoRandomizeMacOnStartup = settings.AutoRandomizeMacOnStartup,
+                    AutoRandomizeAdapterKey = settings.AutoRandomizeAdapterKey,
+                    NotificationsEnabled = settings.NotificationsEnabled,
+                    NotificationSoundEnabled = settings.NotificationSoundEnabled,
+                    NotificationCollapseDuplicates = settings.NotificationCollapseDuplicates,
+                    NotificationQuietHoursEnabled = settings.NotificationQuietHoursEnabled,
+                    NotificationQuietHoursStartHour = settings.NotificationQuietHoursStartHour,
+                    NotificationQuietHoursEndHour = settings.NotificationQuietHoursEndHour,
+                    NotificationDurationSeconds = settings.NotificationDurationSeconds,
+                    UpdateManifestUrl = string.Empty,
+                    ExpectedSignerThumbprint = string.Empty,
+                    FavoriteAdapters = settings.FavoriteAdapters,
+                    ShowConnectedAdaptersOnly = settings.ShowConnectedAdaptersOnly
+                };
                 File.WriteAllText(
                     temporaryPath,
-                    new JavaScriptSerializer().Serialize(settings),
+                    new JavaScriptSerializer().Serialize(preferences),
                     new UTF8Encoding(false));
                 if (File.Exists(_settingsPath))
                 {
                     File.Delete(_settingsPath);
                 }
                 File.Move(temporaryPath, _settingsPath);
+
+                if (hadTrust || File.Exists(_updateTrustPath))
+                {
+                    WriteUpdateTrust(settings);
+                }
+            }
+        }
+
+        private void WriteUpdateTrust(AppSettings settings)
+        {
+            try
+            {
+                var envelope = new UpdateTrustEnvelope
+                {
+                    UpdateManifestUrl = settings.UpdateManifestUrl ?? string.Empty,
+                    ExpectedSignerThumbprint = settings.ExpectedSignerThumbprint ?? string.Empty
+                };
+                string temporaryPath = _updateTrustPath + ".tmp";
+                File.WriteAllText(temporaryPath, envelope.Protect(), new UTF8Encoding(false));
+                if (File.Exists(_updateTrustPath))
+                {
+                    File.Delete(_updateTrustPath);
+                }
+                File.Move(temporaryPath, _updateTrustPath);
+            }
+            catch (Exception error)
+            {
+                // A trust file that cannot be written is worth reporting, because the
+                // values stay in clear text until it can be. Update checks still work;
+                // they are simply not protected yet.
+                AppLogger.Error("Could not write the encrypted update trust file; the values remain in settings.json.", error);
             }
         }
     }

@@ -1,5 +1,21 @@
 # MacRando Changelog
 
+## 1.11.0 - 2026.09
+
+### Security
+
+- **The update manifest URL and the expected signer thumbprint are now encrypted.** These two values together are the trust anchor for code execution: MacRando runs elevated, so anything able to rewrite the manifest URL could aim an update at a server of its choosing. The Authenticode check limits what that achieves, since the download still has to be signed by the expected thumbprint, but the redirect itself should not be writable by anything that is not the user. They now live in `settings.json.trust`, DPAPI-protected against the current user with entropy tied to the product and field names.
+- **The clear text copies are removed from `settings.json` on the next save.** The remaining preferences stay in plain text deliberately: they have no security consequence, and encrypting them would make them unreadable to someone trying to work out why something is misbehaving.
+- **Redirects are no longer followed when fetching the manifest or the download.** The scheme check already refused a plain `http` URL, but a server answering `https` with a `302` to `http` would have downgraded the transfer *after* that check passed, which is the position an active network attacker wants. Any 3xx is now treated as a failure, with the status in the message so a user pointing the manifest at a link-shortener is told what happened. The refusal is set on the HTTP handler rather than on `ServicePointManager`, because the latter is process-wide and would change behaviour for every other request in the process.
+- An existing plaintext settings file is honoured on load and migrated on the next save, so upgrading does not silently disable update checks for someone who had configured them. Verified against a copy of a real pre-upgrade settings file: every preference survived, the two trust values moved, and the resulting trust file discloses neither the host nor the thumbprint.
+- An unreadable trust file falls back to the plain values with a warning rather than refusing to start, because refusing would leave no route back short of deleting a file the user may not know exists.
+
+### Tests
+
+- Thirty-three assertions. The important ones assert the *absence* of a leak: the encrypted file must not contain the manifest URL, the thumbprint, or even the host name, and the plain settings file must no longer contain either value after a save. An earlier version of the envelope did leak the URL, because the clear values were still public properties on the type being serialized; the test caught it and the record written to disk is now a separate type.
+- Garbage, truncated blobs, and a blob carrying a foreign format marker are all refused rather than throwing, and a delete-the-plain-file case is covered so a user clearing settings does not silently lose where updates come from.
+- The redirect test asserts a *default* handler follows redirects, so the check that the update path refuses them cannot pass for the wrong reason, and confirms a 200 is not refused.
+
 ## 1.10.0 - 2026.09
 
 ### Added

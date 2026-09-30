@@ -243,6 +243,11 @@ internal static class NetworkServiceMockTests
             {
                 return layoutResult;
             }
+            int updateTrustResult = UpdateTrustTests.Run();
+            if (updateTrustResult != 0)
+            {
+                return updateTrustResult;
+            }
             return 0;
         }
         catch (Exception error)
