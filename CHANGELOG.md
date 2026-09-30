@@ -1,5 +1,25 @@
 # MacRando Changelog
 
+## 1.15.0 - 2026.09
+
+### Added
+
+- **The tray context menu follows the dashboard's dark mode.** It was the last surface with no theme at all and stayed light next to a dark dashboard. A `ToolStripMenuItem` is a `ToolStripItem`, not a `Control`, so none of the dashboard's theming reached it and the whole menu needed a custom renderer.
+
+  The status line needed its own values, not just a background colour. It was `SystemColors.ControlText` when ready, which is near-black and invisible on a dark menu, and its amber was tuned for a light surface. Each state now has a light and a dark value: ready, needs-restoring, and the not-elevated red that means the app cannot act at all. The three are asserted to stay visually distinct from each other, because a status line that reads the same in every state is worse than no colour.
+
+  Every foreground and background pairing the menu can produce is contrast-checked in both modes, 158 checks in total. Disabled items are drawn at a deliberate readable dimness rather than the system default, which assumes a light surface. High contrast still overrides the dark preference, as everywhere else in MacRando.
+
+- **The tray adapter submenu respects the new adapter classification.** A virtual machine or tunnel adapter is listed with its reason, and its three randomize actions are disabled, matching the dashboard rather than differing from it for the same adapter.
+
+### Fixed
+
+- **A silent WinForms trap in the tray theme.** Assigning a custom `Renderer` puts a `ToolStrip` into `Custom` render mode, and then assigning `RenderMode.Professional` replaces that renderer with a stock `ToolStripProfessionalRenderer` drawing a light palette. The menu then looks almost right, because item foregrounds are set separately and still apply, while the background stays white. Only the renderer is assigned now, and a test asserts the mode is `Custom` and the renderer is the tray one.
+
+### Notes
+
+- ProtonVPN, which this build's user runs, is covered explicitly: its Windows client installs a WireGuard adapter, so the interface may be named `ProtonVPN`, `Proton VPN`, `ProtonVPN Secure Core` or `ProtonVPN (IKEv2)`, and its driver string may be a WireGuard driver, a Wintun driver, or empty depending on version. All of those classify as a tunnel and are left alone, while the physical adapter beside them stays fully usable. ProtonVPN is not installed on the machine these tests run on, so this is covered by unit tests against those names rather than against a live adapter.
+
 ## 1.14.0 - 2026.09
 
 ### Added

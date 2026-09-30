@@ -254,6 +254,13 @@ namespace MacRando
                 {
                     _notificationCenterForm.ApplyTheme(_form.DarkModeEnabled);
                 }
+                // The tray menu follows the dashboard's toggle. Applied immediately rather
+                // than waiting for the next refresh, because a user who has just turned
+                // dark mode on and then opens the tray menu should not be shown a light one.
+                TrayTheme.Apply(_menu, _form.DarkModeEnabled);
+                int pendingAtToggle = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
+                _statusMenuItem.ForeColor =
+                    TrayMenuState.StatusColorFor(pendingAtToggle, IsAdministrator(), _form.DarkModeEnabled);
             };
         }
 
@@ -2982,8 +2989,9 @@ namespace MacRando
             // profile means an adapter is not in the state the user left it in.
             int pending = _state == null || _state.Backups == null ? 0 : _state.Backups.Count;
             bool elevated = IsAdministrator();
+            bool darkMenu = _form.DarkModeEnabled;
             _statusMenuItem.Text = TrayMenuState.StatusText(pending, elevated);
-            _statusMenuItem.ForeColor = TrayMenuState.StatusColor(pending, elevated);
+            _statusMenuItem.ForeColor = TrayMenuState.StatusColorFor(pending, elevated, darkMenu);
             _publicIpMenuItem.Text = "Public IP: " + _publicIp;
             _notifyIcon.Text = TruncateNotifyText(TrayMenuState.NotifyText(pending, elevated));
 
@@ -3014,15 +3022,30 @@ namespace MacRando
                     adapterMenu.DropDownItems.Add(new ToolStripSeparator());
                     bool allowDhcpForAdapter = allowDhcpIp && string.Equals(consentAdapterKey, selectedAdapter.Key, StringComparison.OrdinalIgnoreCase);
                     bool localIpEligible = DashboardForm.IsLocalIpEligible(selectedAdapter, allowDhcpForAdapter);
+
+                    // Off-limits adapters are still listed, with the reason, exactly as on
+                    // the dashboard. Their actions are disabled rather than removed so the
+                    // menu does not look broken or, worse, quietly different from the
+                    // dashboard for the same adapter.
+                    bool changeable = selectedAdapter.IsChangeable;
+                    if (!changeable)
+                    {
+                        adapterMenu.DropDownItems.Add(new ToolStripMenuItem(
+                            TruncateMenuText(AdapterClassification.DescribeRestriction(selectedAdapter.Kind), 92))
+                        {
+                            Enabled = false
+                        });
+                    }
+
                     ToolStripMenuItem both = new ToolStripMenuItem("Randomize MAC + local IP");
                     both.Click += async (sender, args) => await RandomizeAsync(selectedAdapter, true, true);
-                    both.Enabled = !_form.AdapterDataStale && selectedAdapter.MacPropertySupported && localIpEligible;
+                    both.Enabled = changeable && !_form.AdapterDataStale && selectedAdapter.MacPropertySupported && localIpEligible;
                     ToolStripMenuItem mac = new ToolStripMenuItem("Randomize MAC only");
                     mac.Click += async (sender, args) => await RandomizeAsync(selectedAdapter, true, false);
-                    mac.Enabled = !_form.AdapterDataStale && selectedAdapter.MacPropertySupported;
+                    mac.Enabled = changeable && !_form.AdapterDataStale && selectedAdapter.MacPropertySupported;
                     ToolStripMenuItem ip = new ToolStripMenuItem("Randomize local IP only");
                     ip.Click += async (sender, args) => await RandomizeAsync(selectedAdapter, false, true);
-                    ip.Enabled = !_form.AdapterDataStale && localIpEligible;
+                    ip.Enabled = changeable && !_form.AdapterDataStale && localIpEligible;
                     adapterMenu.DropDownItems.Add(both);
                     adapterMenu.DropDownItems.Add(mac);
                     adapterMenu.DropDownItems.Add(ip);
@@ -3112,6 +3135,11 @@ namespace MacRando
             _startWithWindowsMenuItem.Checked = _settings.StartWithWindows;
             _autoRandomizeMenuItem.Checked = _settings.AutoRandomizeMacOnStartup;
             _exitMenuItem.Enabled = !interactionBusy;
+
+            // Applied last, because the menu is rebuilt above on every refresh and the theme
+            // has to be reapplied to the new items. One renderer covers the whole tree, so
+            // this is a single call rather than a walk of the items.
+            TrayTheme.Apply(_menu, darkMenu);
         }
 
         private void SetBusy(bool busy)

@@ -47,7 +47,9 @@ $sources = @(
     (Join-Path $root 'src\KeepChangePolicy.cs'),
     (Join-Path $root 'tests\KeepChangeTests.cs'),
     (Join-Path $root 'src\AdapterKind.cs'),
-    (Join-Path $root 'tests\AdapterKindTests.cs')
+    (Join-Path $root 'tests\AdapterKindTests.cs'),
+    (Join-Path $root 'src\TrayTheme.cs'),
+    (Join-Path $root 'tests\TrayThemeTests.cs')
 )
 $references = @(
     '/reference:System.dll',

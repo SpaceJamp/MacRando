@@ -119,6 +119,40 @@ internal static class AdapterKindTests
 
     private static void TunnelsAreRecognised()
     {
+        // ProtonVPN first, and at length, because the user of this build runs it. Its
+        // Windows client installs a WireGuard adapter, so the same machine can show a
+        // "ProtonVPN" interface whose driver string is a WireGuard driver, a Wintun driver,
+        // or nothing useful at all depending on version. Every combination has to land on
+        // Tunnel, including the name-only case where the driver string is empty.
+        string[][] proton =
+        {
+            new[] { "ProtonVPN", "" },
+            new[] { "Proton VPN", "" },
+            new[] { "ProtonVPN", "ProtonVPN" },
+            new[] { "ProtonVPN", "WireGuard Tunnel" },
+            new[] { "ProtonVPN", "Wintun Userspace Tunnel" },
+            new[] { "ProtonVPN", "Proton VPN WireGuard Adapter" },
+            new[] { "ProtonVPN Adapter", "" },
+            new[] { "Proton VPN Adapter", "" },
+            new[] { "ProtonVPN Secure Core", "" },
+            new[] { "ProtonVPN (IKEv2)", "" }
+        };
+        for (int index = 0; index < proton.Length; index++)
+        {
+            AdapterKind kind = Classify(proton[index][0], proton[index][1]);
+            Check(kind == AdapterKind.Tunnel,
+                "ProtonVPN as \"" + proton[index][0] + " / " + proton[index][1] +
+                "\" should be a tunnel, but was " + kind);
+            Check(!AdapterClassification.IsChangeable(kind),
+                "MacRando must not change the ProtonVPN adapter. Randomizing the address a tunnel " +
+                "presents breaks the tunnel, and MacRando does not own ProtonVPN's configuration, " +
+                "so it could not put it right.");
+            // The user's physical adapter alongside the tunnel must stay usable, or the
+            // classification would have made ProtonVPN unusable rather than merely safe.
+            Check(Classify("Ethernet", "Realtek Gaming 2.5GbE Family Controller") == AdapterKind.Physical,
+                "the physical adapter must remain changeable while a ProtonVPN tunnel is present");
+        }
+
         // Third-party tunnels, the ones MacRando knows nothing about and so cannot restore.
         string[][] thirdParty =
         {

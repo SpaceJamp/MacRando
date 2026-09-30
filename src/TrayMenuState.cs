@@ -48,6 +48,41 @@ namespace MacRando
                 : SystemColors.ControlText;
         }
 
+        /// <summary>
+        /// The same three states, resolved for whichever menu surface is showing them.
+        ///
+        /// The light values above are kept as they are because the menu was light until
+        /// recently and a user with a light dashboard should see no change. A dark menu
+        /// needs its own values: SystemColors.ControlText is near-black and would be
+        /// unreadable on the dark surface, and the light amber would sit on dark at a
+        /// contrast that reads as a different, weaker signal than intended.
+        ///
+        /// Every pairing is checked for contrast by the test suite, because a status line
+        /// that is unreadable is the one failure that a user would not report so much as
+        /// quietly stop trusting.
+        /// </summary>
+        public static Color StatusColorFor(int pendingRestoreCount, bool elevated, bool darkMode)
+        {
+            if (darkMode)
+            {
+                if (!elevated)
+                {
+                    return Color.FromArgb(252, 165, 165);
+                }
+                return pendingRestoreCount > 0
+                    ? Color.FromArgb(251, 191, 36)
+                    : Color.FromArgb(226, 232, 240);
+            }
+
+            if (!elevated)
+            {
+                return Color.FromArgb(185, 28, 28);
+            }
+            return pendingRestoreCount > 0
+                ? Color.FromArgb(180, 83, 9)
+                : Color.FromArgb(30, 41, 59);
+        }
+
         public static string NotifyText(int pendingRestoreCount, bool elevated)
         {
             if (!elevated)

@@ -258,6 +258,11 @@ internal static class NetworkServiceMockTests
             {
                 return adapterKindResult;
             }
+            int trayThemeResult = TrayThemeTests.Run();
+            if (trayThemeResult != 0)
+            {
+                return trayThemeResult;
+            }
             return 0;
         }
         catch (Exception error)
