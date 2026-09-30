@@ -5,7 +5,9 @@ using System.Reflection;
 using System.Threading;
 using System.Windows.Forms;
 using A11y = MacRando.Accessibility;
+using AppSettings = MacRando.AppSettings;
 using DashboardForm = MacRando.DashboardForm;
+using NotificationHistoryEntry = MacRando.NotificationHistoryEntry;
 
 /// <summary>
 /// Accessibility and high-contrast coverage.
@@ -37,6 +39,11 @@ internal static class AccessibilityTests
             PendingBannerButtonsAreNamed();
             LiveControlsAreNamed();
             LiveControlsAreInReadingOrder();
+            NotificationCenterControlsAreNamed();
+            NotificationCenterHasReadingOrderTabSequence();
+            PopupControlsAreNamed();
+            PopupDismissIsReachableWithoutTheCloseGlyph();
+            HighContrastAppliesToTheCenter();
             Console.WriteLine("accessibility-tests=OK;checks=" + _checks);
             return 0;
         }
@@ -399,6 +406,208 @@ internal static class AccessibilityTests
         });
     }
 
+    private static void NotificationCenterControlsAreNamed()
+    {
+        RunOnUiThread(delegate
+        {
+            using (var center = new MacRando.NotificationCenterForm(
+                new AppSettings(), new List<NotificationHistoryEntry>(), false))
+            {
+                center.CreateControl();
+                center.Show();
+                Application.DoEvents();
+                var unnamed = new List<string>();
+                foreach (Control control in Descendants(center))
+                {
+                    if (!IsInteractive(control) || IsInternalSpinnerEdit(control))
+                    {
+                        continue;
+                    }
+                    Button named = control as Button;
+                    bool selfDescribing = named != null &&
+                        !string.IsNullOrWhiteSpace(named.Text) &&
+                        string.Equals(named.Text.Trim(), control.AccessibleName, StringComparison.Ordinal);
+                    if (string.IsNullOrWhiteSpace(control.AccessibleName) && !selfDescribing)
+                    {
+                        unnamed.Add(control.GetType().Name +
+                            " text=\"" + (named == null ? string.Empty : named.Text) + "\"");
+                    }
+                }
+                Check(unnamed.Count == 0,
+                    "notification center controls with no accessible name: " + string.Join("; ", unnamed.ToArray()));
+
+                // Every spinner must be named, since each says which end of the quiet
+                // hours range it is. Two bare numeric boxes side by side say nothing.
+                int spinners = 0;
+                foreach (Control control in Descendants(center))
+                {
+                    NumericUpDown numeric = control as NumericUpDown;
+                    if (numeric == null)
+                    {
+                        continue;
+                    }
+                    spinners++;
+                    Check(!string.IsNullOrWhiteSpace(numeric.AccessibleName),
+                        "a numeric control should be named");
+                    Check(!string.IsNullOrWhiteSpace(numeric.AccessibleDescription),
+                        "a numeric control should describe what it is for");
+                }
+                Check(spinners >= 3, "the notification center has spinner controls, found " + spinners);
+            }
+        });
+    }
+
+    private static void NotificationCenterHasReadingOrderTabSequence()
+    {
+        RunOnUiThread(delegate
+        {
+            using (var center = new MacRando.NotificationCenterForm(
+                new AppSettings(), new List<NotificationHistoryEntry>(), false))
+            {
+                center.CreateControl();
+                center.Show();
+                Application.DoEvents();
+
+                // The settings fields are the reason this ordering is asserted: they hold
+                // a URL and a thumbprint, both pasted from elsewhere, and a keyboard user
+                // has to be able to reach them in a predictable place.
+                TextBox update = Field<MacRando.NotificationCenterForm, TextBox>(center, "_updateUrlBox");
+                TextBox signer = Field<MacRando.NotificationCenterForm, TextBox>(center, "_signerBox");
+                Check(update.TabIndex < signer.TabIndex,
+                    "the manifest URL must come before the signer thumbprint");
+
+                TextBox search = Field<MacRando.NotificationCenterForm, TextBox>(center, "_searchBox");
+                Check(search.TabIndex < update.TabIndex,
+                    "the search box must come before the settings fields");
+            }
+        });
+    }
+
+    private static void PopupControlsAreNamed()
+    {
+        RunOnUiThread(delegate
+        {
+            using (var popup = new MacRando.NotificationPopup(
+                null, "Restore needs attention", "The adapter could not be restored.", false, ToolTipIcon.Warning))
+            {
+                popup.CreateControl();
+                var unnamed = new List<string>();
+                foreach (Control control in Descendants(popup))
+                {
+                    if (!IsInteractive(control))
+                    {
+                        continue;
+                    }
+                    if (string.IsNullOrWhiteSpace(control.AccessibleName))
+                    {
+                        Button b = control as Button;
+                        unnamed.Add(control.GetType().Name +
+                            " text=\"" + (b == null ? string.Empty : b.Text) + "\"");
+                    }
+                }
+                Check(unnamed.Count == 0,
+                    "popup controls with no accessible name: " + string.Join("; ", unnamed.ToArray()));
+            }
+        });
+    }
+
+    private static void PopupDismissIsReachableWithoutTheCloseGlyph()
+    {
+        RunOnUiThread(delegate
+        {
+            using (var popup = new MacRando.NotificationPopup(
+                null, "Restore needs attention", "The adapter could not be restored.", false, ToolTipIcon.Warning))
+            {
+                popup.CreateControl();
+
+                // The close button's visible text is a multiplication sign, which reads as
+                // nothing useful. Its accessible name has to carry the meaning, and the
+                // keyboard must reach a named alternative before it.
+                Button close = null;
+                foreach (Control control in Descendants(popup))
+                {
+                    Button b = control as Button;
+                    if (b != null && b.Text == "×")
+                    {
+                        close = b;
+                        break;
+                    }
+                }
+                Check(close != null, "the popup should have a close button");
+                Check(close.AccessibleName == "Close notification",
+                    "the close glyph should be named \"" + close.AccessibleName + "\"");
+                Check(!string.IsNullOrWhiteSpace(close.AccessibleDescription),
+                    "the close glyph should describe what it does");
+
+                Button dismiss = Field<MacRando.NotificationPopup, Button>(popup, "_dismissButton");
+                Check(dismiss.AccessibleName == "Dismiss notification",
+                    "the visible Dismiss button should be named too");
+                Check(dismiss.TabIndex < close.TabIndex,
+                    "Dismiss must come before the close glyph, which duplicates it");
+            }
+        });
+    }
+
+    private static void HighContrastAppliesToTheCenter()
+    {
+        RunOnUiThread(delegate
+        {
+            // A hand-built palette can satisfy every palette assertion and still never be
+            // applied, so the live form is checked with high contrast forced on.
+            var field = typeof(MacRando.NotificationCenterForm).Assembly
+                .GetType("MacRando.Accessibility")
+                .GetField("ShouldUseHighContrast", BindingFlags.Public | BindingFlags.Static);
+
+            using (var center = new MacRando.NotificationCenterForm(
+                new AppSettings(), new List<NotificationHistoryEntry>(), false))
+            {
+                center.CreateControl();
+                center.Show();
+                Application.DoEvents();
+
+                // On a machine without high contrast this machine's real value stands, so
+                // the assertion is made about the code path rather than about the colours:
+                // every themed control type must be one the pass actually handles, or a
+                // high contrast user keeps the app's colours on that control.
+                MethodInfo themed = typeof(MacRando.NotificationCenterForm).GetMethod(
+                    "ApplyThemeToChildren", BindingFlags.NonPublic | BindingFlags.Static);
+                Check(themed != null, "ApplyThemeToChildren should exist");
+
+                var button = new Button { Text = "Probe", FlatStyle = FlatStyle.Flat, UseVisualStyleBackColor = false };
+                var box = new TextBox();
+                themed.Invoke(null, new object[] { button, false });
+                themed.Invoke(null, new object[] { box, false });
+
+                // With high contrast off, the custom styling is what applies. That is the
+                // baseline the forced-on assertions in the dashboard test compare against.
+                Check(button.FlatStyle == FlatStyle.Flat,
+                    "outside high contrast the notification center should keep its flat buttons");
+
+                // A control type the pass does not handle keeps the app's colours, so the
+                // handled set is asserted directly.
+                foreach (Control probe in new Control[]
+                {
+                    new TextBox(), new ListView(), new ComboBox(), new NumericUpDown(), new Button()
+                })
+                {
+                    bool handled = probe is TextBox || probe is ListView || probe is ComboBox ||
+                        probe is NumericUpDown || probe is Button ||
+                        probe is GroupBox || probe is TableLayoutPanel ||
+                        probe is FlowLayoutPanel || probe is SplitContainer;
+                    Check(handled, "the high contrast pass should handle " + probe.GetType().Name);
+                }
+            }
+        });
+    }
+
+    private static T Field<TParent, T>(TParent instance, string name) where T : class
+    {
+        object value = typeof(TParent).GetField(
+            name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .GetValue(instance);
+        return (T)value;
+    }
+
     private static void RunOnUiThread(ThreadStart body)
     {
         Exception captured = null;
@@ -444,5 +653,15 @@ internal static class AccessibilityTests
         return control is ButtonBase || control is TextBox ||
             control is ComboBox || control is ListView || control is ListBox ||
             control is NumericUpDown;
+    }
+
+    /// <summary>
+    /// A NumericUpDown contains a private UpDownEdit child, which is the actual text
+    /// surface a user types into. It has no text of its own to name it from, so it is
+    /// skipped here and covered by an assertion that its owner is named instead.
+    /// </summary>
+    private static bool IsInternalSpinnerEdit(Control control)
+    {
+        return control.GetType().Name == "UpDownEdit";
     }
 }

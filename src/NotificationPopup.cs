@@ -45,6 +45,7 @@ namespace MacRando
         private readonly Button _retryButton;
         private readonly Button _diagnosticsButton;
         private readonly Button _dismissButton;
+        private Button _closeButton;
         private bool _persistent;
         private bool _dismissed;
         private bool _disposed;
@@ -119,6 +120,62 @@ namespace MacRando
             _closeTimer.Interval = _timeoutMilliseconds;
             _closeTimer.Tick += (sender, args) => Dismiss(false);
             SetActions(false, false, null, null, persistent, timeoutMilliseconds);
+            ApplyAccessibility();
+        }
+
+        /// <summary>
+        /// Names the popup's controls and puts them in a sensible tab order.
+        ///
+        /// A popup is the one surface a user may meet with no other MacRando window open,
+        /// so it has to stand on its own for assistive technology. The actions are named
+        /// with their consequence, because "Retry" on its own does not say what is being
+        /// retried, and the title and message together form the notification's accessible
+        /// text.
+        ///
+        /// Order is left to right as the buttons appear visually: Dismiss, Diagnostics,
+        /// Retry, Restore now, Open dashboard, then the close button, which is last
+        /// because it duplicates Dismiss and reaching it first would be a trap.
+        /// </summary>
+        private void ApplyAccessibility()
+        {
+            Accessibility.Describe(_titleLabel, "Notification title", AccessibleRole.Text,
+                string.IsNullOrWhiteSpace(TitleText) ? null : TitleText);
+            Accessibility.Describe(_messageLabel, "Notification details", AccessibleRole.Text,
+                string.IsNullOrWhiteSpace(MessageText) ? null : MessageText);
+
+            Accessibility.Describe(_dismissButton, "Dismiss notification", AccessibleRole.PushButton,
+                "Closes this notification. Nothing is changed by dismissing it.");
+            Accessibility.Describe(_diagnosticsButton, "Run read-only diagnostics", AccessibleRole.PushButton,
+                "Opens a read-only report about the selected adapter. Changes nothing.");
+            Accessibility.Describe(_retryButton, "Retry the operation", AccessibleRole.PushButton,
+                "Attempts the failed operation again. A restore profile is saved first.");
+            Accessibility.Describe(_restoreButton, "Restore this adapter now", AccessibleRole.PushButton,
+                "Returns the adapter to the configuration saved when the change was made.");
+            Accessibility.Describe(_openButton, "Open the dashboard", AccessibleRole.PushButton,
+                "Opens the MacRando dashboard.");
+
+            if (_closeButton != null)
+            {
+                // The visible glyph is a multiplication sign, which reads as "times" or
+                // nothing at all, so the name carries the meaning.
+                Accessibility.Describe(_closeButton, "Close notification", AccessibleRole.PushButton,
+                    "Closes this notification. Nothing is changed by closing it.");
+            }
+
+            var sequence = new Control[]
+            {
+                _dismissButton, _diagnosticsButton, _retryButton, _restoreButton,
+                _openButton, _closeButton
+            };
+            int index = 0;
+            foreach (Control control in sequence)
+            {
+                if (control != null)
+                {
+                    control.TabIndex = index;
+                    index++;
+                }
+            }
         }
 
         public void Configure(
@@ -392,6 +449,45 @@ namespace MacRando
             closeButton.FlatAppearance.BorderSize = 0;
             closeButton.FlatAppearance.MouseOverBackColor = darkMode ? Color.FromArgb(55, 65, 81) : Color.FromArgb(241, 245, 249);
             closeButton.Click += (sender, args) => TriggerAction(NotificationPopupAction.Dismiss);
+            _closeButton = closeButton;
+
+            // High contrast replaces the custom styling rather than layering on top of it,
+            // matching the dashboard. A borderless custom button on a high contrast
+            // background is the combination that becomes invisible.
+            if (Accessibility.ShouldUseHighContrast())
+            {
+                closeButton.FlatStyle = FlatStyle.Standard;
+                closeButton.UseVisualStyleBackColor = true;
+                closeButton.BackColor = SystemColors.Window;
+                closeButton.ForeColor = SystemColors.WindowText;
+                _dismissButton.FlatStyle = FlatStyle.Standard;
+                _dismissButton.UseVisualStyleBackColor = true;
+                _dismissButton.BackColor = SystemColors.Window;
+                _dismissButton.ForeColor = SystemColors.WindowText;
+                _diagnosticsButton.FlatStyle = FlatStyle.Standard;
+                _diagnosticsButton.UseVisualStyleBackColor = true;
+                _diagnosticsButton.BackColor = SystemColors.Window;
+                _diagnosticsButton.ForeColor = SystemColors.WindowText;
+                _retryButton.FlatStyle = FlatStyle.Standard;
+                _retryButton.UseVisualStyleBackColor = true;
+                _retryButton.BackColor = SystemColors.Window;
+                _retryButton.ForeColor = SystemColors.WindowText;
+                _restoreButton.FlatStyle = FlatStyle.Standard;
+                _restoreButton.UseVisualStyleBackColor = true;
+                _restoreButton.BackColor = SystemColors.Window;
+                _restoreButton.ForeColor = SystemColors.WindowText;
+                _openButton.FlatStyle = FlatStyle.Standard;
+                _openButton.UseVisualStyleBackColor = true;
+                _openButton.BackColor = SystemColors.Window;
+                _openButton.ForeColor = SystemColors.WindowText;
+                _titleLabel.ForeColor = SystemColors.WindowText;
+                _titleLabel.BackColor = SystemColors.Window;
+                _messageLabel.ForeColor = SystemColors.WindowText;
+                _messageLabel.BackColor = SystemColors.Window;
+                BackColor = SystemColors.Window;
+                _actionsPanel.BackColor = SystemColors.Window;
+                textPanel.BackColor = SystemColors.Window;
+            }
 
             content.Controls.Add(iconBox, 0, 0);
             content.Controls.Add(textPanel, 1, 0);

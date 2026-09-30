@@ -1,5 +1,22 @@
 # MacRando Changelog
 
+## 1.10.0 - 2026.09
+
+### Added
+
+- **Accessible names and descriptions throughout the notification center and the notification popups.** The 1.8.0 pass covered the dashboard only, which left the two surfaces a user is most likely to meet first without accessible naming. This closes that gap.
+- The **update settings fields** are the reason this mattered beyond tidiness. The manifest URL and the expected signer thumbprint are both values a user pastes from somewhere else, and a bare edit box says neither what it wants nor what happens if the thumbprint is wrong. Their descriptions now state that an update is refused unless the downloaded file matches both the hash and the signer.
+- The **quiet-hours spinners** are each named for which end of the range they are. Two bare numeric boxes sitting side by side tell a screen reader user nothing about what they are setting.
+- **High contrast in the notification center and popups.** Both previously kept their own colours regardless. Under high contrast the custom styling is replaced rather than layered over, so the system draws the borders, and the footer text becomes full contrast rather than the deliberately muted shade that is the first thing to become unreadable.
+- The popup's close button is named **Close notification**. Its visible text is a multiplication sign, which reads as "times" or nothing at all, so the name has to carry the meaning. It is also last in the tab order, after the visible Dismiss button, since reaching a second identical control first would be a trap.
+
+### Tests
+
+- Twenty-three more assertions, walking the live notification center and a live popup and requiring an accessible name on every interactive control, skipping only `NumericUpDown`'s internal edit child, which is a private type with no visible text to name it from. The spinner owner is asserted named instead.
+- The popup's tab order is asserted specifically for Dismiss preceding the close glyph, since that relationship is the reason the ordering exists.
+- The high contrast path is asserted to handle every control type present in the center, so a control added later without a case in the pass fails the build rather than quietly keeping the app's colours on a high contrast display.
+- The dashboard's high contrast test already asserted its own negative case, that the custom styling still applies when high contrast is off. The center's equivalent asserts the same baseline, so a check that passed because the pass did nothing could not pass silently.
+
 ## 1.9.0 - 2026.09
 
 ### Changed

@@ -166,11 +166,26 @@ namespace MacRando
             _list.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59);
             _detailsBox.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.FromArgb(248, 250, 252);
             _detailsBox.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59);
+            if (Accessibility.ShouldUseHighContrast())
+            {
+                // The form's own background is set before the child pass, so it has to be
+                // corrected here or the window frame keeps the app's colour.
+                BackColor = SystemColors.Window;
+                ForeColor = SystemColors.WindowText;
+                _list.BackColor = SystemColors.Window;
+                _list.ForeColor = SystemColors.WindowText;
+                _detailsBox.BackColor = SystemColors.Window;
+                _detailsBox.ForeColor = SystemColors.WindowText;
+            }
             ApplyThemeToChildren(this, darkMode);
             if (_footerLabel != null)
             {
                 // Muted, but still above 4.5:1 against the themed background in both modes.
-                _footerLabel.ForeColor = darkMode ? Color.FromArgb(148, 163, 184) : Color.FromArgb(71, 85, 105);
+                // Under high contrast the muted colour is the first thing to fail, so it
+                // becomes full contrast.
+                _footerLabel.ForeColor = Accessibility.ShouldUseHighContrast()
+                    ? SystemColors.WindowText
+                    : (darkMode ? Color.FromArgb(148, 163, 184) : Color.FromArgb(71, 85, 105));
             }
             RefreshList();
         }
@@ -313,6 +328,123 @@ namespace MacRando
             root.Controls.Add(footer, 0, 3);
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Controls.Add(root);
+
+            ApplyAccessibility();
+        }
+
+        /// <summary>
+        /// Names the notification center's controls and fixes the tab order.
+        ///
+        /// The two settings fields are the reason this matters beyond tidiness: they
+        /// contain a URL and a certificate thumbprint, both of which a user pastes from
+        /// elsewhere, and a bare edit box gives no indication of which is which or what
+        /// happens if the thumbprint is wrong. The descriptions carry that, along with
+        /// the fact that an update is refused unless the downloaded file matches both the
+        /// hash and the signer.
+        ///
+        /// Order follows the visual layout top to bottom: filter, list, details, actions,
+        /// then the settings and the test button.
+        /// </summary>
+        private void ApplyAccessibility()
+        {
+            Accessibility.Describe(_searchBox, "Search notifications", AccessibleRole.Text,
+                "Filters the list by title, message, or adapter name.");
+            Accessibility.Describe(_severityFilter, "Filter by severity", AccessibleRole.ComboBox,
+                "Shows only notifications of one severity, or all of them.");
+            Accessibility.Describe(_list, "Notification history", AccessibleRole.List,
+                "Use the up and down arrows to move between notifications. The details of the selected one appear below.");
+            Accessibility.Describe(_detailsBox, "Notification details", AccessibleRole.Text,
+                "The full text of the selected notification, including what to do about it.");
+            Accessibility.Describe(_copyButton, "Copy notification details", AccessibleRole.PushButton,
+                "Copies the details of the selected notification to the clipboard.");
+            Accessibility.Describe(_openButton, "Open the dashboard", AccessibleRole.PushButton,
+                "Opens the MacRando dashboard.");
+            Accessibility.Describe(_restoreButton, "Restore this adapter", AccessibleRole.PushButton,
+                "Returns the adapter to the configuration saved when the change was made.");
+            Accessibility.Describe(_retryButton, "Retry the operation", AccessibleRole.PushButton,
+                "Attempts the failed operation again.");
+            Accessibility.Describe(_diagnosticsButton, "Run read-only diagnostics", AccessibleRole.PushButton,
+                "Opens a read-only report about the adapter. Changes nothing.");
+            Accessibility.Describe(_updateUrlBox, "Update manifest URL", AccessibleRole.Text,
+                "Where MacRando looks for update information. Leave blank to disable update checks.");
+            Accessibility.Describe(_signerBox, "Expected signer thumbprint", AccessibleRole.Text,
+                "The certificate thumbprint an update must be signed with. An update whose signer does not match is refused.");
+            Accessibility.Describe(_duration, "Popup duration in seconds", AccessibleRole.SpinButton,
+                "How long a notification stays on screen before it closes.");
+            Accessibility.Describe(_footerLabel, "Version and license", AccessibleRole.Text,
+                "The running version, the license, and a note that notifications are sanitized before storage.");
+
+            // The quiet-hours pair. Both are empty of visible text of their own, and
+            // together they form one setting, so each says which end of the range it is.
+            Accessibility.Describe(_quietStart, "Quiet hours start hour", AccessibleRole.SpinButton,
+                "0 to 23. Notifications are suppressed from this hour until the end hour.");
+            Accessibility.Describe(_quietEnd, "Quiet hours end hour", AccessibleRole.SpinButton,
+                "0 to 23. Notifications are suppressed from the start hour until this hour.");
+
+            // The remaining items are created by a layout helper, so they are matched by
+            // their visible text. A miss is logged rather than failing silently, because a
+            // renamed button would otherwise leave an unlabelled control on screen.
+            NameByVisibleText("Refresh", "Refresh the notification list", "Re-reads the stored notification history.");
+            NameByVisibleText("Clear history", "Clear notification history", "Deletes every stored notification. This cannot be undone.");
+            NameByVisibleText("Close", "Close the notification center", "Closes this window. Stored notifications are kept.");
+            NameByVisibleText("Apply preferences", "Apply preferences", "Saves the notification settings shown above.");
+            NameByVisibleText("Check for updates", "Check for updates", "Downloads and verifies a newer build, if one exists.");
+            NameByVisibleText("Send test notification", "Send a test notification", "Shows a notification so you can confirm how they look and sound.");
+
+            // The settings toggles are created by a helper, so they are named by their
+            // visible text where the helper did not set one.
+            foreach (Control control in Descendants(this))
+            {
+                CheckBox check = control as CheckBox;
+                if (check != null && string.IsNullOrWhiteSpace(check.AccessibleName))
+                {
+                    // The state of a checkbox is announced by the control itself, so the
+                    // name only has to say what is being toggled.
+                    Accessibility.Describe(check, check.Text, AccessibleRole.CheckButton, null);
+                }
+            }
+
+            var sequence = new Control[]
+            {
+                _searchBox, _severityFilter, _list, _detailsBox, _copyButton,
+                _diagnosticsButton, _retryButton, _restoreButton, _openButton,
+                _updateUrlBox, _signerBox, _duration
+            };
+            for (int index = 0; index < sequence.Length; index++)
+            {
+                if (sequence[index] != null)
+                {
+                    sequence[index].TabIndex = index;
+                }
+            }
+        }
+
+        private void NameByVisibleText(string text, string name, string description)
+        {
+            foreach (Control control in Descendants(this))
+            {
+                Button button = control as Button;
+                if (button != null && string.Equals(button.Text, text, StringComparison.Ordinal) &&
+                    string.IsNullOrWhiteSpace(button.AccessibleName))
+                {
+                    Accessibility.Describe(button, name, AccessibleRole.PushButton, description);
+                }
+            }
+        }
+
+        internal static List<Control> Descendants(Control root)
+        {
+            var found = new List<Control>();
+            if (root == null)
+            {
+                return found;
+            }
+            foreach (Control child in root.Controls)
+            {
+                found.Add(child);
+                found.AddRange(Descendants(child));
+            }
+            return found;
         }
 
         private void WireEvents()
@@ -578,8 +710,36 @@ namespace MacRando
 
         private static void ApplyThemeToChildren(Control parent, bool darkMode)
         {
+            // High contrast replaces the custom styling instead of layering over it.
+            // A themed panel with a flat borderless button on top is exactly the
+            // combination that becomes invisible, and the whole point of high contrast
+            // is that the user cannot read a subtle one.
+            bool highContrast = Accessibility.ShouldUseHighContrast();
             foreach (Control control in parent.Controls)
             {
+                if (highContrast)
+                {
+                    if (control is TextBox || control is ListView || control is ComboBox || control is NumericUpDown)
+                    {
+                        control.BackColor = SystemColors.Window;
+                        control.ForeColor = SystemColors.WindowText;
+                    }
+                    else if (control is Button)
+                    {
+                        Button system = (Button)control;
+                        system.FlatStyle = FlatStyle.Standard;
+                        system.UseVisualStyleBackColor = true;
+                        system.BackColor = SystemColors.Window;
+                        system.ForeColor = SystemColors.WindowText;
+                    }
+                    else if (control is GroupBox || control is TableLayoutPanel ||
+                             control is FlowLayoutPanel || control is SplitContainer)
+                    {
+                        control.ForeColor = SystemColors.WindowText;
+                    }
+                    ApplyThemeToChildren(control, darkMode);
+                    continue;
+                }
                 if (control is TextBox)
                 {
                     control.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.White;

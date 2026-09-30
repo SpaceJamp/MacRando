@@ -168,9 +168,11 @@ A routine uninstall deliberately leaves restore profiles alone. See the uninstal
 
 ## Accessibility and high contrast
 
-Every interactive control carries an accessible name, and the ones that change something carry a description of the consequence. A button reading only "Randomize local IPv4 address" does not convey that a restore profile is saved first, or that the DHCP consent is per operation and never stored, so those facts are attached to the control rather than left to be inferred from the visible label.
+Every interactive control carries an accessible name, and the ones that change something carry a description of the consequence. A button reading only "Randomize local IPv4 address" does not convey that a restore profile is saved first, or that the DHCP consent is per operation and never stored, so those facts are attached to the control rather than left to be inferred from the visible label. This covers the dashboard, the notification center, and the notification popups.
 
-Tab order follows the reading order of the page, not the order the controls happen to be constructed. The pending restore banner's **Restore all** leads when it is visible.
+The two fields where this matters most are the update manifest URL and the expected signer thumbprint. Both are values you paste from elsewhere, and the description states that an update is refused unless the downloaded file matches both the hash and the signer.
+
+Tab order follows the reading order of the page, not the order the controls happen to be constructed. The pending restore banner's **Restore all** leads when it is visible. In a notification popup, the visible **Dismiss** button precedes the corner close glyph, because the two do the same thing and reaching a duplicate first would be a trap.
 
 High contrast is honoured. Every colour comes from `SystemColors` so the user's own choice is what renders, the dark mode toggle is ignored while it is active, the flat custom button styling is undone so the system draws the borders, and the low-contrast secondary text becomes full contrast.
 
