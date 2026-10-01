@@ -273,6 +273,11 @@ internal static class NetworkServiceMockTests
             {
                 return licenseResult;
             }
+            int startupResult = StartupRegistrationTests.Run();
+            if (startupResult != 0)
+            {
+                return startupResult;
+            }
             return 0;
         }
         catch (Exception error)

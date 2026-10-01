@@ -87,11 +87,19 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Registry]
-; Matches the key the application itself writes when Start with Windows is enabled, so
-; the installer's choice and the application's setting cannot disagree.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
-    ValueType: string; ValueName: "MacRando"; ValueData: """{app}\{#AppExeName}"""; \
-    Flags: uninsdeletevalue; Tasks: startwithwindows
+; Nothing is written here on purpose.
+;
+; MacRando's manifest requires administrator, and Explorer cannot elevate a Run key
+; entry: it asks for the process, the elevation cannot be satisfied from that path, and
+; the launch produces nothing. Windows records the attempt and its completion in the same
+; second with PID 0, meaning no process was ever created. On the machine this was found on
+; that was 10 attempts across 3 days, every one of them silent, with no error dialog and
+; nothing in MacRando's log because the application never started to write one.
+;
+; A Run value was therefore never a usable registration for this application. Start with
+; Windows is a scheduled task registered at logon with the highest run level, created
+; below when the option is ticked and removed on uninstall. The application registers the
+; same task from its tray menu, so the two paths agree on the task name.
 
 [Run]
 ; shellexec is required, not a preference. MacRando.exe embeds
@@ -107,8 +115,18 @@ Filename: "{app}\{#AppExeName}"; Description: "Start {#AppName}"; \
     Flags: nowait postinstall skipifsilent shellexec
 
 [UninstallRun]
-; Remove the Run key on uninstall regardless of how it was added, since the application
-; can also write it and the user may have enabled the setting from inside the app.
+; Remove the logon task. Leaving it behind would launch an executable that is no longer
+; installed, at every logon, silently.
+;
+; schtasks rather than PowerShell: an Inno parameter value containing braces is read as a
+; constant reference, because { } is how Inno writes constants. A PowerShell one-liner with
+; try and catch in it does not survive that, and it failed to compile with "Unknown
+; constant" until it was replaced.
+Filename: "schtasks.exe"; Parameters: "/Delete /TN MacRando /F"; \
+    Flags: runhidden; RunOnceId: "RemoveLogonTask"
+; Also remove the Run value, because a machine upgrading from an earlier version still has
+; one. It never worked, but it would otherwise keep appearing in startup diagnostics as
+; though it were doing something.
 Filename: "reg"; Parameters: "delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v MacRando /f"; \
     Flags: runhidden; RunOnceId: "RemoveRunKey"
 
@@ -131,9 +149,46 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
   CertPath: String;
+  TaskScript: String;
 begin
   if CurStep = ssPostInstall then
   begin
+    if WizardIsTaskSelected('startwithwindows') then
+    begin
+      { A scheduled task at logon with the highest run level, rather than a Run key value.
+        Explorer cannot elevate a Run key entry, so the Run value never worked for an
+        application that requires administrator. The task is registered for the account
+        running Setup, which is the person whose session will log on.
+
+        The path is passed through an environment variable rather than written into the
+        script, because the installation directory is user-visible and may contain spaces
+        or a quote.
+
+        Every statement is a single complete literal. Splitting one statement across two
+        literals with a trailing '+' does work, but Pascal concatenates with no separator,
+        so a missing space in the continuation silently splits a PowerShell command in
+        two. That cannot happen when each literal is a whole statement, and it lets the
+        script be checked by reading each line rather than by reconstructing it. }
+      TaskScript :=
+        '$ErrorActionPreference = ''Stop'';' + #13#10 +
+        '$action = New-ScheduledTaskAction -Execute $env:MR_EXE -Argument ''--startup'';' + #13#10 +
+        '$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME;' + #13#10 +
+        '$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest;' + #13#10 +
+        '$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew;' + #13#10 +
+        'Register-ScheduledTask -TaskName ''MacRando'' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null;';
+      Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+           '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + TaskScript + '"',
+           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      if ResultCode <> 0 then
+      begin
+        MsgBox('MacRando could not be set to start when Windows starts (error ' +
+               IntToStr(ResultCode) + '). You can turn this on later from the tray menu.' + #13#10 + #13#10 +
+               'It has to be a scheduled task rather than a startup entry, because MacRando ' +
+               'requires administrator and Windows cannot elevate a startup entry.',
+               mbError, MB_OK);
+      end;
+    end;
+
     if not WizardIsTaskSelected('trustcertificate') then
     begin
       Exit;

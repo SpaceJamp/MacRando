@@ -1,5 +1,23 @@
 # MacRando Changelog
 
+## 1.16.1 - 2026.09
+
+### Fixed
+
+- **Start with Windows now works.** It never has. The registration was a value in the Run key, and MacRando's manifest requires administrator, which Explorer cannot satisfy for a Run key entry. Windows recorded the attempt and its completion in the same second with PID 0, meaning no process was ever created. On the machine this was found on: 10 attempts across 3 days, all silent, no error dialog, and nothing in MacRando's log because the application never started to write one.
+
+  Start with Windows is now a scheduled task at logon registered to run with the highest privileges, which is the mechanism Windows provides for an application that legitimately needs elevation. It starts silently, with no prompt at every logon. The dead Run value is removed when the task is registered, and on uninstall, because a machine upgrading from an earlier version still carries one.
+
+  The setting can no longer claim something untrue. If the task cannot be created the toggle reports the failure rather than showing a tick beside a setting that did nothing, and at startup a missing registration is recreated rather than the setting being quietly turned off, which would have made every upgrading user lose their existing choice on first launch.
+
+- **The installer launches MacRando after install.** A postinstall entry runs once the wizard has closed and Setup is back on the signed-in user's token, and the default launcher is CreateProcess, which cannot start a process whose manifest asks for a higher integrity level. It failed with "CreateProcess failed; code 740. The requested operation requires elevation" and showed the user an error instead of the application. It now launches through ShellExecute, which honours the manifest. No test ran the installer, and a silent install skips postinstall entries entirely, so this only ever appeared for a person installing interactively.
+
+- **The installer's start with Windows option registers the scheduled task** rather than writing a Run value, and the uninstaller removes it. The uninstaller uses schtasks rather than PowerShell, because Inno reads braces in a parameter value as a constant reference, so a try/catch one-liner does not compile.
+
+### Notes
+
+- Registration passes the installation path through the environment rather than interpolating it into a command, since that directory is user-visible and can contain spaces or a quote. Checking whether the task exists reads a single file rather than running schtasks, because it is asked on every startup and a process spawn taking hundreds of milliseconds on the application's constructor path is a real cost for a question with a cheap answer.
+
 ## 1.16.0 - 2026.09
 
 ### Fixed

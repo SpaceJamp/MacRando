@@ -120,8 +120,26 @@ namespace MacRando
             _settings = _settingsStore.Load();
             if (_settings.StartWithWindows && !IsStartupRegistrationPresent())
             {
-                _settings.StartWithWindows = false;
-                _settingsStore.Save(_settings);
+                // Re-register rather than quietly turning the setting off. Every machine
+                // upgrading from an earlier version has the setting on with only the Run key,
+                // which never worked, so the registration is genuinely absent. Disabling it
+                // here would make the user's existing choice disappear on first launch and
+                // look like the fix failing. Registered, so the choice is honoured and the
+                // task actually comes into existence.
+                if (StartupRegistration.Set(true, Application.ExecutablePath))
+                {
+                    AppLogger.Info("The start when Windows registration was missing and has been recreated.");
+                }
+                else
+                {
+                    // Only now give up on it, and say so. This is the path that ends with the
+                    // setting off, and it should be visible rather than inferred.
+                    _settings.StartWithWindows = false;
+                    _settingsStore.Save(_settings);
+                    AppLogger.Warning(
+                        "Start with Windows was enabled but no logon task was registered, and it could not be " +
+                        "created. The setting has been turned off.");
+                }
             }
             _form = new DashboardForm();
             _form.SetStartupRandomizationEnabled(_settings.AutoRandomizeMacOnStartup);
@@ -2837,36 +2855,24 @@ namespace MacRando
 
         private static void SetStartupRegistration(bool enabled)
         {
-            const string runKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(runKeyPath, true) ??
-                Registry.CurrentUser.CreateSubKey(runKeyPath))
+            if (!StartupRegistration.Set(enabled, Application.ExecutablePath))
             {
-                if (enabled)
-                {
-                    string executable = Application.ExecutablePath;
-                    key.SetValue("MacRando", "\"" + executable + "\" --startup", RegistryValueKind.String);
-                }
-                else
-                {
-                    key.DeleteValue("MacRando", false);
-                }
+                // Thrown rather than logged, so the toggle reports a failure instead of
+                // showing a tick beside a setting that did nothing. Returning quietly is
+                // what made the original defect invisible: the setting said enabled, the
+                // registration never worked, and nothing contradicted it.
+                throw new InvalidOperationException(
+                    enabled
+                        ? "MacRando could not be registered to start when Windows starts. " +
+                          "It has to be a scheduled task, because MacRando requires administrator and " +
+                          "Windows cannot elevate a startup entry."
+                        : "MacRando could not remove its start when Windows registration.");
             }
         }
 
         private static bool IsStartupRegistrationPresent()
         {
-            try
-            {
-                const string runKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(runKeyPath, false))
-                {
-                    return key != null && key.GetValue("MacRando") != null;
-                }
-            }
-            catch
-            {
-                return false;
-            }
+            return StartupRegistration.IsRegistered();
         }
 
         /// <summary>
