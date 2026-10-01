@@ -35,6 +35,7 @@ internal static class LayoutTests
         try
         {
             NothingOverlapsAtAnySize();
+            NoControlIsClippedAtAnySize();
             TheAdapterListIsAlwaysUsable();
             TheListPaneIsNotClippedAtHighDpi();
             NothingOverlapsUnderHighDpiScaling();
@@ -648,6 +649,57 @@ internal static class LayoutTests
                 }
             }
         });
+    }
+
+    private static void NoControlIsClippedAtAnySize()
+    {
+        RunOnUiThread(delegate
+        {
+            foreach (bool dark in new[] { false, true })
+            {
+                using (DashboardForm form = new DashboardForm())
+                {
+                    Populate(form);
+                    CheckBox toggle = (CheckBox)typeof(DashboardForm)
+                        .GetField("_darkModeCheckBox", BindingFlags.Instance | BindingFlags.NonPublic)
+                        .GetValue(form);
+                    toggle.Checked = dark;
+                    Application.DoEvents();
+
+                    foreach (Size size in Sizes())
+                    {
+                        form.Size = size;
+                        Settle(form);
+                        foreach (Control c in AllControls(form))
+                        {
+                            if (!c.Visible || c is Form || c is ListView) continue;
+                            Rectangle v = Visible(c, form);
+                            if (v.Width == 0 && v.Height == 0) continue;
+                            // A control should never be entirely outside the form bounds.
+                            if (v.Right <= 0 || v.Bottom <= 0 || v.Left >= form.Width || v.Top >= form.Height)
+                            {
+                                Check(false,
+                                    "control \"" + c.Name + "\" (\"" + c.Text + "\") is entirely outside the " +
+                                    "form bounds at " + size.Width + "x" + size.Height + " (" +
+                                    (dark ? "dark" : "light") + ")");
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    private static IEnumerable<Control> AllControls(Control root)
+    {
+        foreach (Control child in root.Controls)
+        {
+            yield return child;
+            foreach (Control grandchild in AllControls(child))
+            {
+                yield return grandchild;
+            }
+        }
     }
 
     private static void RunOnUiThread(ThreadStart body)

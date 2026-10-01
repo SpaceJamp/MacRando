@@ -1447,20 +1447,19 @@ namespace MacRando
                     publicIp = await _network.GetPublicIpAsync();
 
                     // Fetch geolocation if user has opted in
-                    if (_settings != null && _settings.ShowPublicIpLocation && publicIp != "Unavailable")
+                    if (_settings != null && _settings.ShowPublicIpLocation && publicIp != "Unavailable" && currentNetworkIdentity != null)
                     {
                         try
                         {
                             var geo = await _network.GetPublicIpGeolocationAsync(publicIp);
                             if (geo != null)
                             {
-                                var identity = await _network.GetNetworkIdentityAsync();
-                                identity.PublicIpCountry = geo.Country;
-                                identity.PublicIpRegion = geo.Region;
-                                identity.PublicIpCity = geo.City;
-                                identity.PublicIpIsp = geo.Isp;
-                                identity.PublicIpAsn = geo.Asn;
-                                identity.PublicIpTimezone = geo.Timezone;
+                                currentNetworkIdentity.PublicIpCountry = geo.Country;
+                                currentNetworkIdentity.PublicIpRegion = geo.Region;
+                                currentNetworkIdentity.PublicIpCity = geo.City;
+                                currentNetworkIdentity.PublicIpIsp = geo.Isp;
+                                currentNetworkIdentity.PublicIpAsn = geo.Asn;
+                                currentNetworkIdentity.PublicIpTimezone = geo.Timezone;
                             }
                         }
                         catch

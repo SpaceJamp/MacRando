@@ -1441,7 +1441,7 @@ namespace MacRando
             AddPageRow(page, vpnCard);
 
             TableLayoutPanel safetyBody;
-            TableLayoutPanel safetyCard = CreateCard("Safety and status", 1, 6, out safetyBody);
+            TableLayoutPanel safetyCard = CreateCard("Safety and status", 1, 7, out safetyBody);
             ConfigureSafetyBody(safetyBody);
 
             var detailsLayout = new TableLayoutPanel

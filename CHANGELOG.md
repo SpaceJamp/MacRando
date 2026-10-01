@@ -1,5 +1,11 @@
 # MacRando Changelog
 
+## 1.16.4 - 2026.10
+
+### Fixed
+
+- **Overlapping controls in the Safety and status section.** `CreateCard("Safety and status", 1, 6, ...)` created a 6-row body but `SetBodyRows` supplied 7 heights after the geolocation checkbox was added. The 7th row had no RowStyle, causing the last control to overlap the one above it. Fixed by updating `CreateCard` to accept 7 rows. A new `NoControlIsClippedAtAnySize` layout test now catches any control that falls entirely outside the form bounds at any tested size.
+
 ## 1.16.3 - 2026.10
 
 ### Fixed

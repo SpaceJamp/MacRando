@@ -171,7 +171,7 @@ namespace MacRando
     internal static class AppInfo
     {
         public const string ProductName = "MacRando";
-        public const string Version = "1.16.3";
+        public const string Version = "1.16.4";
         public const string BuildLabel = "2026.09";
         public static string DisplayVersion { get { return Version + " (" + BuildLabel + ")"; } }
     }
