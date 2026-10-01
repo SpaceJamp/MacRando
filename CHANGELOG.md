@@ -1,5 +1,11 @@
 # MacRando Changelog
 
+## 1.16.3 - 2026.10
+
+### Fixed
+
+- **Public IP geolocation: ipwhois.io was returning 404 for every request, so the feature was silently failing.** Switched to ipinfo.io (50k requests/month free without auth, HTTPS, returns all needed fields). The ASN is extracted from the `org` field (e.g. "AS15169 Google LLC" → ASN "AS15169", ISP "Google LLC").
+
 ## 1.16.2 - 2026.10
 
 ### Added

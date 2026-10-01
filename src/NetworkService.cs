@@ -977,7 +977,7 @@ if ($code -ne 0) {
         }
 
         /// <summary>
-        /// Fetches geolocation data for the public IP from ipwhois.io.
+        /// Fetches geolocation data for the public IP from ipinfo.io.
         /// Only called when the user has opted in via ShowPublicIpLocation setting.
         /// </summary>
         public async Task<PublicIpGeolocation> GetPublicIpGeolocationAsync(string publicIp)
@@ -989,8 +989,10 @@ if ($code -ne 0) {
 
             try
             {
-                // ipwhois.io: HTTPS, no API key required, 10k req/month free, GDPR compliant
-                string url = "https://ipwhois.io/" + publicIp + "?fields=country,region,city,isp,asn,timezone";
+                // ipinfo.io: HTTPS, 50k requests/month free without auth, returns all
+                // fields we need. The previous service (ipwhois.io) was returning 404
+                // for every request, so this feature was silently failing.
+                string url = "https://ipinfo.io/" + publicIp + "/json";
                 using (HttpResponseMessage response = await PublicIpClient.GetAsync(url))
                 {
                     if (!response.IsSuccessStatusCode)
@@ -999,7 +1001,7 @@ if ($code -ne 0) {
                     }
                     string json = await response.Content.ReadAsStringAsync();
                     var data = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<PublicIpGeolocation>(json);
-                    if (data != null && data.Success)
+                    if (data != null)
                     {
                         return data;
                     }
@@ -1013,17 +1015,34 @@ if ($code -ne 0) {
         }
 
         /// <summary>
-        /// DTO for ipwhois.io JSON response.
+        /// DTO for ipinfo.io JSON response.
+        /// ipinfo.io returns: country, region, city, org (AS number + name), timezone.
         /// </summary>
         internal sealed class PublicIpGeolocation
         {
-            public bool Success { get; set; }
+            public string Ip { get; set; }
             public string Country { get; set; }
             public string Region { get; set; }
             public string City { get; set; }
-            public string Isp { get; set; }
-            public string Asn { get; set; }
+            public string Org { get; set; }
             public string Timezone { get; set; }
+
+            /// <summary>ISP and ASN combined from the Org field (e.g. "AS15169 Google LLC").</summary>
+            public string Isp
+            {
+                get { return Org; }
+            }
+
+            /// <summary>ASN extracted from the Org field (e.g. "AS15169").</summary>
+            public string Asn
+            {
+                get
+                {
+                    if (string.IsNullOrWhiteSpace(Org)) return string.Empty;
+                    int space = Org.IndexOf(' ');
+                    return space > 0 ? Org.Substring(0, space) : Org;
+                }
+            }
         }
 
         public IPAddress FindRandomLocalAddress(NetworkState state)

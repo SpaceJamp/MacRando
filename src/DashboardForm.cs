@@ -342,7 +342,7 @@ namespace MacRando
                 }
             };
 
-            _showPublicIpLocationCheckBox = new CheckBox { Text = "Show public IP location (sends IP to ipwhois.io)", AutoSize = true, UseVisualStyleBackColor = false };
+            _showPublicIpLocationCheckBox = new CheckBox { Text = "Show public IP location (sends IP to ipinfo.io)", AutoSize = true, UseVisualStyleBackColor = false };
             _showPublicIpLocationCheckBox.CheckedChanged += (sender, args) =>
             {
                 if (PublicIpLocationConsentChanged != null)
@@ -925,7 +925,7 @@ namespace MacRando
             Accessibility.Describe(_allowDhcpIpCheckBox, "Allow DHCP IP randomization", AccessibleRole.CheckButton,
                 "Risky. Consent is required for each operation and is never stored. An adapter using DHCP cannot be randomized without it.");
             Accessibility.Describe(_showPublicIpLocationCheckBox, "Show public IP location", AccessibleRole.CheckButton,
-                "Sends your public IP to ipwhois.io to fetch country, city, ISP, and ASN. Off by default for privacy. You can enable it to see where your IP is located.");
+                "Sends your public IP to ipinfo.io to fetch country, city, ISP, and ASN. Off by default for privacy. You can enable it to see where your IP is located.");
             Accessibility.Describe(_connectedOnlyCheckBox, "Connected adapters only", AccessibleRole.CheckButton,
                 "Hides adapters that are not currently connected.");
             Accessibility.Describe(_adapterSearchBox, "Search adapters", AccessibleRole.Text,
