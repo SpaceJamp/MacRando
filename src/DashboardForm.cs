@@ -117,6 +117,7 @@ namespace MacRando
         private readonly TextBox _macTextBox;
         private readonly ComboBox _vpnCombo;
         private readonly CheckBox _allowDhcpIpCheckBox;
+        private readonly CheckBox _showPublicIpLocationCheckBox;
         private readonly CheckBox _darkModeCheckBox;
         private readonly ToolTip _toolTip;
 
@@ -200,6 +201,7 @@ namespace MacRando
         public event EventHandler RestorePermanentRequested;
         public event EventHandler KeepChangeRequested;
         public event EventHandler DhcpIpConsentChanged;
+        public event EventHandler PublicIpLocationConsentChanged;
         public event EventHandler RandomizeIpRequested;
         public event EventHandler RestoreRequested;
         public event EventHandler ConnectVpnRequested;
@@ -231,6 +233,11 @@ namespace MacRando
         public bool AllowDhcpIpRandomization
         {
             get { return _allowDhcpIpCheckBox != null && _allowDhcpIpCheckBox.Checked; }
+        }
+
+        public bool ShowPublicIpLocation
+        {
+            get { return _showPublicIpLocationCheckBox != null && _showPublicIpLocationCheckBox.Checked; }
         }
 
         public bool DarkModeEnabled
@@ -332,6 +339,15 @@ namespace MacRando
                 if (DhcpIpConsentChanged != null)
                 {
                     DhcpIpConsentChanged(this, EventArgs.Empty);
+                }
+            };
+
+            _showPublicIpLocationCheckBox = new CheckBox { Text = "Show public IP location (sends IP to ipwhois.io)", AutoSize = true, UseVisualStyleBackColor = false };
+            _showPublicIpLocationCheckBox.CheckedChanged += (sender, args) =>
+            {
+                if (PublicIpLocationConsentChanged != null)
+                {
+                    PublicIpLocationConsentChanged(this, EventArgs.Empty);
                 }
             };
 
@@ -541,6 +557,14 @@ namespace MacRando
             _startupRandomizeButton.Text = enabled ? "Disable startup MAC randomization" : "Enable startup MAC randomization";
         }
 
+        public void SetShowPublicIpLocationEnabled(bool enabled)
+        {
+            if (_showPublicIpLocationCheckBox != null)
+            {
+                _showPublicIpLocationCheckBox.Checked = enabled;
+            }
+        }
+
         public void SetBackupAvailable(bool available)
         {
             IsBackupAvailable = available;
@@ -553,13 +577,37 @@ namespace MacRando
             UpdateSelectionDetails();
         }
 
-        public void SetPublicIp(string value)
+        public void SetPublicIp(string value, NetworkIdentity networkIdentity = null)
         {
             string display = string.IsNullOrWhiteSpace(value) ? "Unavailable" : value;
             _publicIpLabel.Text = display;
             _headerPublicIpLabel.Text = "Public IP: " + display;
-            _toolTip.SetToolTip(_publicIpLabel, "Public IP: " + display);
-            _toolTip.SetToolTip(_headerPublicIpLabel, "Public IP: " + display);
+
+            string tooltip = "Public IP: " + display;
+            if (networkIdentity != null)
+            {
+                var geoParts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(networkIdentity.PublicIpCountry))
+                    geoParts.Add("Country: " + networkIdentity.PublicIpCountry);
+                if (!string.IsNullOrWhiteSpace(networkIdentity.PublicIpRegion))
+                    geoParts.Add("Region: " + networkIdentity.PublicIpRegion);
+                if (!string.IsNullOrWhiteSpace(networkIdentity.PublicIpCity))
+                    geoParts.Add("City: " + networkIdentity.PublicIpCity);
+                if (!string.IsNullOrWhiteSpace(networkIdentity.PublicIpIsp))
+                    geoParts.Add("ISP: " + networkIdentity.PublicIpIsp);
+                if (!string.IsNullOrWhiteSpace(networkIdentity.PublicIpAsn))
+                    geoParts.Add("ASN: " + networkIdentity.PublicIpAsn);
+                if (!string.IsNullOrWhiteSpace(networkIdentity.PublicIpTimezone))
+                    geoParts.Add("Timezone: " + networkIdentity.PublicIpTimezone);
+
+                if (geoParts.Count > 0)
+                {
+                    tooltip += Environment.NewLine + string.Join(Environment.NewLine, geoParts);
+                }
+            }
+
+            _toolTip.SetToolTip(_publicIpLabel, tooltip);
+            _toolTip.SetToolTip(_headerPublicIpLabel, tooltip);
         }
 
         public void SetStatus(string value)
@@ -876,6 +924,8 @@ namespace MacRando
                 "A read-only report of what an IP change would alter. Changes nothing.");
             Accessibility.Describe(_allowDhcpIpCheckBox, "Allow DHCP IP randomization", AccessibleRole.CheckButton,
                 "Risky. Consent is required for each operation and is never stored. An adapter using DHCP cannot be randomized without it.");
+            Accessibility.Describe(_showPublicIpLocationCheckBox, "Show public IP location", AccessibleRole.CheckButton,
+                "Sends your public IP to ipwhois.io to fetch country, city, ISP, and ASN. Off by default for privacy. You can enable it to see where your IP is located.");
             Accessibility.Describe(_connectedOnlyCheckBox, "Connected adapters only", AccessibleRole.CheckButton,
                 "Hides adapters that are not currently connected.");
             Accessibility.Describe(_adapterSearchBox, "Search adapters", AccessibleRole.Text,
@@ -2207,11 +2257,15 @@ namespace MacRando
 
         private void ConfigureSafetyBody(TableLayoutPanel body)
         {
-            SetBodyRows(body, 28, 32, 65, 38, 38, 38);
+            SetBodyRows(body, 28, 24, 65, 38, 38, 38, 38);
             _allowDhcpIpCheckBox.AutoSize = false;
             _allowDhcpIpCheckBox.Dock = DockStyle.Fill;
             _allowDhcpIpCheckBox.TextAlign = ContentAlignment.MiddleLeft;
             _allowDhcpIpCheckBox.Margin = Padding.Empty;
+            _showPublicIpLocationCheckBox.AutoSize = false;
+            _showPublicIpLocationCheckBox.Dock = DockStyle.Fill;
+            _showPublicIpLocationCheckBox.TextAlign = ContentAlignment.MiddleLeft;
+            _showPublicIpLocationCheckBox.Margin = Padding.Empty;
             _safetySummaryLabel.Dock = DockStyle.Fill;
             _safetySummaryLabel.TextAlign = ContentAlignment.MiddleLeft;
             _safetySummaryLabel.Margin = Padding.Empty;
@@ -2225,11 +2279,12 @@ namespace MacRando
             _ipPreflightButton.Dock = DockStyle.Fill;
             _ipPreflightButton.Margin = Padding.Empty;
             body.Controls.Add(_allowDhcpIpCheckBox, 0, 0);
-            body.Controls.Add(_safetySummaryLabel, 0, 1);
-            body.Controls.Add(_operationStatusLabel, 0, 2);
-            body.Controls.Add(_startupRandomizeButton, 0, 3);
-            body.Controls.Add(_notificationCenterButton, 0, 4);
-            body.Controls.Add(_ipPreflightButton, 0, 5);
+            body.Controls.Add(_showPublicIpLocationCheckBox, 0, 1);
+            body.Controls.Add(_safetySummaryLabel, 0, 2);
+            body.Controls.Add(_operationStatusLabel, 0, 3);
+            body.Controls.Add(_startupRandomizeButton, 0, 4);
+            body.Controls.Add(_notificationCenterButton, 0, 5);
+            body.Controls.Add(_ipPreflightButton, 0, 6);
         }
 
         private static TableLayoutPanel CreateCard(string title, int bodyColumns, int bodyRows, out TableLayoutPanel body)

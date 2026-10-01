@@ -976,6 +976,56 @@ if ($code -ne 0) {
             }
         }
 
+        /// <summary>
+        /// Fetches geolocation data for the public IP from ipwhois.io.
+        /// Only called when the user has opted in via ShowPublicIpLocation setting.
+        /// </summary>
+        public async Task<PublicIpGeolocation> GetPublicIpGeolocationAsync(string publicIp)
+        {
+            if (string.IsNullOrWhiteSpace(publicIp))
+            {
+                return null;
+            }
+
+            try
+            {
+                // ipwhois.io: HTTPS, no API key required, 10k req/month free, GDPR compliant
+                string url = "https://ipwhois.io/" + publicIp + "?fields=country,region,city,isp,asn,timezone";
+                using (HttpResponseMessage response = await PublicIpClient.GetAsync(url))
+                {
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        return null;
+                    }
+                    string json = await response.Content.ReadAsStringAsync();
+                    var data = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<PublicIpGeolocation>(json);
+                    if (data != null && data.Success)
+                    {
+                        return data;
+                    }
+                }
+            }
+            catch
+            {
+                // Silently fail - geolocation is a nice-to-have, not critical
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// DTO for ipwhois.io JSON response.
+        /// </summary>
+        internal sealed class PublicIpGeolocation
+        {
+            public bool Success { get; set; }
+            public string Country { get; set; }
+            public string Region { get; set; }
+            public string City { get; set; }
+            public string Isp { get; set; }
+            public string Asn { get; set; }
+            public string Timezone { get; set; }
+        }
+
         public IPAddress FindRandomLocalAddress(NetworkState state)
         {
             return FindRandomLocalAddress(state, true);

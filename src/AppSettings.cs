@@ -22,6 +22,10 @@ namespace MacRando
         public string ExpectedSignerThumbprint { get; set; }
         public System.Collections.Generic.List<string> FavoriteAdapters { get; set; }
         public bool ShowConnectedAdaptersOnly { get; set; }
+        /// <summary>
+        /// Whether to fetch and show public IP geolocation. Off by default for privacy.
+        /// </summary>
+        public bool ShowPublicIpLocation { get; set; }
 
         public AppSettings()
         {

@@ -1,5 +1,11 @@
 # MacRando Changelog
 
+## 1.16.2 - 2026.10
+
+### Added
+
+- **Public IP geolocation (opt-in).** When enabled, the app sends your public IP to ipwhois.io (HTTPS, no API key, 10k req/month free, GDPR compliant) and displays country, region, city, ISP, ASN, and timezone in the Public IP tooltip. Off by default for privacy; the checkbox "Show public IP location (sends IP to ipwhois.io)" is in the Safety card. The setting is persisted and synced across launches. The geolocation is fetched on each refresh when the IP changes, and cached for the session. If the lookup fails, the IP is still shown without location data.
+
 ## 1.16.1 - 2026.09
 
 ### Fixed

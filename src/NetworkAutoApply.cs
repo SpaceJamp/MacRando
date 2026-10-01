@@ -15,6 +15,16 @@ namespace MacRando
         public string Key { get; set; }
         public string Description { get; set; }
 
+        /// <summary>
+        /// Public IP geolocation (only populated when the user opts in).
+        /// </summary>
+        public string PublicIpCountry { get; set; }
+        public string PublicIpRegion { get; set; }
+        public string PublicIpCity { get; set; }
+        public string PublicIpIsp { get; set; }
+        public string PublicIpAsn { get; set; }
+        public string PublicIpTimezone { get; set; }
+
         public bool IsUsable
         {
             get { return !string.IsNullOrWhiteSpace(Key); }

@@ -143,6 +143,7 @@ namespace MacRando
             }
             _form = new DashboardForm();
             _form.SetStartupRandomizationEnabled(_settings.AutoRandomizeMacOnStartup);
+            _form.SetShowPublicIpLocationEnabled(_settings.ShowPublicIpLocation);
             _menu = new ContextMenuStrip();
             _publicIpMenuItem = new ToolStripMenuItem("Public IP: checking...");
             _adaptersMenu = new ToolStripMenuItem("Adapters");
@@ -230,6 +231,11 @@ namespace MacRando
                 RefreshFormPresets();
             };
             _form.DhcpIpConsentChanged += (sender, args) => RefreshMenus();
+            _form.PublicIpLocationConsentChanged += (sender, args) =>
+            {
+                _settings.ShowPublicIpLocation = _form.ShowPublicIpLocation;
+                _settingsStore.Save(_settings);
+            };
             _form.RestoreAllPendingRequested += async (sender, args) => await RestoreAllPendingAsync();
             _form.AdapterViewChanged += (sender, args) => SaveAdapterViewPreferences();
             _form.ToggleFavoriteRequested += (sender, args) => ToggleSelectedAdapterFavorite();
@@ -1380,6 +1386,15 @@ namespace MacRando
             // cmdlets, for two questions that do not depend on each other. The public IP
             // is still fetched on its own: folding that in would make a dashboard refresh
             // wait on a third-party service.
+            NetworkIdentity currentNetworkIdentity = null;
+            try
+            {
+                currentNetworkIdentity = await _network.GetNetworkIdentityAsync();
+            }
+            catch
+            {
+                // Ignore identity fetch failures; the UI will just show IP without geolocation
+            }
             NetworkSnapshot snapshot = null;
             bool vpnRefreshFailed = false;
             try
@@ -1430,6 +1445,29 @@ namespace MacRando
                 try
                 {
                     publicIp = await _network.GetPublicIpAsync();
+
+                    // Fetch geolocation if user has opted in
+                    if (_settings != null && _settings.ShowPublicIpLocation && publicIp != "Unavailable")
+                    {
+                        try
+                        {
+                            var geo = await _network.GetPublicIpGeolocationAsync(publicIp);
+                            if (geo != null)
+                            {
+                                var identity = await _network.GetNetworkIdentityAsync();
+                                identity.PublicIpCountry = geo.Country;
+                                identity.PublicIpRegion = geo.Region;
+                                identity.PublicIpCity = geo.City;
+                                identity.PublicIpIsp = geo.Isp;
+                                identity.PublicIpAsn = geo.Asn;
+                                identity.PublicIpTimezone = geo.Timezone;
+                            }
+                        }
+                        catch
+                        {
+                            // Silently ignore geolocation failures
+                        }
+                    }
                 }
                 catch
                 {
@@ -1450,7 +1488,7 @@ namespace MacRando
             _form.SetVpnProfiles(_vpnProfiles);
             RefreshFormPresets();
             UpdateFormBackupState();
-            _form.SetPublicIp(_publicIp);
+            _form.SetPublicIp(_publicIp, currentNetworkIdentity);
             string status = IsAdministrator()
                 ? "Ready. Changes restart the selected adapter and may briefly disconnect it."
                 : "Administrator permission is required for network changes.";
