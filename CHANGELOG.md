@@ -1,5 +1,22 @@
 # MacRando Changelog
 
+## 1.16.5 - 2026.10
+
+### Fixed
+
+- **The public IP location was never actually shown on screen.** The feature reported its result only as a tooltip on the public IP label, so enabling it changed nothing a user could see. The location now appears in the header, directly under the public IP, and in the "Public IP and VPN" card. The header is the only part of the window that is never scrolled, and the card that also shows the address sits at the bottom of a scroll area, so the header is where this belongs.
+- **Enabling the setting did nothing until you pressed Refresh.** Ticking "Show public IP location" saved the preference and stopped there. The row now shows "Locating..." on the click that gives consent, and the lookup runs immediately instead of waiting for an unrelated manual refresh.
+- **Turning the setting off left the location on screen.** A refresh already in flight could still hand over a populated identity, and it was displayed even after the opt-in was withdrawn. The opt-in is now checked before the data is used, so the location clears the moment the box is unticked.
+- **Public IP and geolocation failures were completely silent.** Both paths swallowed the exception, so "Unavailable" with an empty tooltip was indistinguishable from a fetch that had not run. Both are now written to the log.
+
+### Added
+
+- The Location row states which of three things is true: the setting is off, the lookup failed, or the location itself. These are different problems with different fixes and were previously indistinguishable.
+
+### Tests
+
+- `ThePublicIpLocationIsReportedOnScreen` asserts the location is on the same always-visible surface as the address, at all 66 tested window sizes, and that it clears when the opt-in is withdrawn. A tooltip-only implementation fails it.
+
 ## 1.16.4 - 2026.10
 
 ### Fixed

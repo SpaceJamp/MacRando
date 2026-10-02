@@ -36,6 +36,7 @@ internal static class LayoutTests
         {
             NothingOverlapsAtAnySize();
             NoControlIsClippedAtAnySize();
+            ThePublicIpLocationIsReportedOnScreen();
             TheAdapterListIsAlwaysUsable();
             TheListPaneIsNotClippedAtHighDpi();
             NothingOverlapsUnderHighDpiScaling();
@@ -686,6 +687,130 @@ internal static class LayoutTests
                         }
                     }
                 }
+            }
+        });
+    }
+
+    /// <summary>
+    /// The public IP location must be readable on screen.
+    ///
+    /// This feature shipped reporting its result only as a tooltip on the public IP label,
+    /// so enabling it changed nothing a user could see, and two releases were spent on a
+    /// live service that was working while the interface looked permanently dead. The row
+    /// has to exist, be visible, and say which of the three states it is in: not enabled,
+    /// enabled but the lookup failed, or the location itself.
+    /// </summary>
+    private static void ThePublicIpLocationIsReportedOnScreen()
+    {
+        RunOnUiThread(delegate
+        {
+            using (DashboardForm form = new DashboardForm())
+            {
+                Populate(form);
+
+                Label location = (Label)typeof(DashboardForm)
+                    .GetField("_publicIpLocationLabel", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(form);
+                Check(location != null, "the dashboard has no label for the public IP location.");
+                if (location == null)
+                {
+                    return;
+                }
+
+                CheckBox box = (CheckBox)typeof(DashboardForm)
+                    .GetField("_showPublicIpLocationCheckBox", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(form);
+
+                var noData = new NetworkIdentity();
+                box.Checked = false;
+                form.SetPublicIp("203.0.113.9", noData);
+                Check(location.Text.IndexOf("Off", StringComparison.OrdinalIgnoreCase) >= 0,
+                    "with the setting off the Location row does not say it is off; it reads: " + location.Text);
+
+                // Enabled but the lookup produced nothing. This is a different problem with
+                // a different fix, so the row must not claim the user never turned it on.
+                box.Checked = true;
+                form.SetPublicIp("203.0.113.9", noData);
+                Check(location.Text.IndexOf("Off", StringComparison.OrdinalIgnoreCase) < 0,
+                    "with the setting on and no data, the Location row still says it is off: " + location.Text);
+                Check(location.Text.IndexOf("could not be reached", StringComparison.OrdinalIgnoreCase) >= 0,
+                    "with the setting on and no data, the Location row does not report a failed lookup; it reads: "
+                        + location.Text);
+
+                // The case that was actually broken: data arrives and has to appear.
+                var identity = new NetworkIdentity
+                {
+                    PublicIpCity = "Clermont",
+                    PublicIpRegion = "Florida",
+                    PublicIpCountry = "US",
+                    PublicIpIsp = "Charter Communications, Inc",
+                    PublicIpAsn = "AS33363",
+                    PublicIpTimezone = "America/New_York"
+                };
+                form.SetPublicIp("203.0.113.9", identity);
+                Check(location.Text.Contains("Clermont"),
+                    "the Location row does not show the city; it reads: " + location.Text);
+                Check(location.Text.Contains("Florida"),
+                    "the Location row does not show the region; it reads: " + location.Text);
+                Check(location.Text.Contains("US"),
+                    "the Location row does not show the country; it reads: " + location.Text);
+                Check(location.Text.Contains("Charter Communications"),
+                    "the Location row does not show the provider; it reads: " + location.Text);
+                Check(location.Text.Contains("AS33363"),
+                    "the Location row does not show the network number; it reads: " + location.Text);
+
+                // The header is the only surface that is never scrolled or collapsed, and it
+                // is where the public IP is always visible. The location has to sit on that
+                // same surface, in the same cell, so it can never be separated from the
+                // address it explains. This is the check that a tooltip-only implementation
+                // would fail.
+                Label headerIp = (Label)typeof(DashboardForm)
+                    .GetField("_headerPublicIpLabel", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(form);
+                Label headerLocation = (Label)typeof(DashboardForm)
+                    .GetField("_headerPublicIpLocationLabel", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(form);
+                Check(headerLocation != null, "the header has no label for the public IP location.");
+                if (headerLocation == null)
+                {
+                    return;
+                }
+
+                form.SetPublicIp("203.0.113.9", identity);
+                Check(headerLocation.Text.Contains("Clermont"),
+                    "the header does not show the location; it reads: " + headerLocation.Text);
+                Check(headerLocation.Text.Contains("AS33363"),
+                    "the header does not show the network number; it reads: " + headerLocation.Text);
+
+                string headerFilled = headerLocation.Text;
+                int exercised = 0;
+                foreach (Size size in Sizes())
+                {
+                    form.Size = size;
+                    Settle(form);
+                    Rectangle ipVisible = Visible(headerIp, form);
+                    if (ipVisible.Width <= 0 || ipVisible.Height <= 0)
+                    {
+                        continue;
+                    }
+                    exercised++;
+                    Rectangle locationVisible = Visible(headerLocation, form);
+                    Check(locationVisible.Width > 0 && locationVisible.Height > 0,
+                        "the public IP is in the header at " + size.Width + "x" + size.Height
+                            + " but its location is not, so the location is harder to reach than the address");
+                    Check(headerLocation.Text == headerFilled,
+                        "the header location text changed when the window was resized to "
+                            + size.Width + "x" + size.Height);
+                }
+                Check(exercised > 0,
+                    "no tested window size showed the public IP in the header, so the location was never exercised.");
+
+                // Opting out has to clear the header as well as the card.
+                box.Checked = false;
+                form.SetPublicIp("203.0.113.9", identity);
+                Check(headerLocation.Text.Length == 0,
+                    "the header still shows a location after the setting was turned off; it reads: "
+                        + headerLocation.Text);
             }
         });
     }

@@ -231,10 +231,19 @@ namespace MacRando
                 RefreshFormPresets();
             };
             _form.DhcpIpConsentChanged += (sender, args) => RefreshMenus();
-            _form.PublicIpLocationConsentChanged += (sender, args) =>
+            _form.PublicIpLocationConsentChanged += async (sender, args) =>
             {
                 _settings.ShowPublicIpLocation = _form.ShowPublicIpLocation;
                 _settingsStore.Save(_settings);
+
+                // Saving the preference is not the same as acting on it. The checkbox used
+                // to persist the setting and stop there, so ticking it produced no lookup
+                // and nothing on screen until the user happened to press Refresh. A
+                // privacy setting has to take effect on the click that gives consent.
+                if (_form.ShowPublicIpLocation)
+                {
+                    await SafeRefreshAsync();
+                }
             };
             _form.RestoreAllPendingRequested += async (sender, args) => await RestoreAllPendingAsync();
             _form.AdapterViewChanged += (sender, args) => SaveAdapterViewPreferences();
@@ -1461,16 +1470,28 @@ namespace MacRando
                                 currentNetworkIdentity.PublicIpAsn = geo.Asn;
                                 currentNetworkIdentity.PublicIpTimezone = geo.Timezone;
                             }
+                            else
+                            {
+                                // A null result is the expected shape for a refused or
+                                // unreachable service, so it has to be recorded here. Every
+                                // failure on this path used to be swallowed, which left the
+                                // Location row blank with nothing to tell anyone why.
+                                AppLogger.Warning(
+                                    "The public IP location service returned no usable data for the current address.");
+                            }
                         }
-                        catch
+                        catch (Exception error)
                         {
-                            // Silently ignore geolocation failures
+                            AppLogger.Error("The public IP location lookup failed.", error);
                         }
                     }
                 }
-                catch
+                catch (Exception error)
                 {
                     publicIp = "Unavailable";
+                    // Recorded rather than swallowed: "Unavailable" on its own cannot be
+                    // told apart from a working fetch that has not happened yet.
+                    AppLogger.Error("The public IP lookup failed.", error);
                 }
             }
             else

@@ -113,6 +113,25 @@ namespace MacRando
             }
         }
 
+        /// <summary>
+        /// Shown in the Location row while the opt-in is off. The row is always present, so
+        /// turning the setting on visibly replaces this text with the real location instead
+        /// of the row silently appearing.
+        /// </summary>
+        private const string PublicIpLocationOptInHint =
+            "Off. Enable \"Show public IP location\" in Safety and status.";
+
+        private const string PublicIpLocationUnavailableHint =
+            "The location service could not be reached. Press Refresh to try again.";
+
+        private const string PublicIpLocationLookingUpHint =
+            "Looking up your public IP location...";
+
+        /// <summary>Header variant: 220px wide, so no full sentences.</summary>
+        private const string PublicIpLocationUnavailableShort = "Location unavailable";
+
+        private const string PublicIpLocationLookingUpShort = "Locating...";
+
         private readonly ListView _adapterList;
         private readonly TextBox _macTextBox;
         private readonly ComboBox _vpnCombo;
@@ -143,6 +162,7 @@ namespace MacRando
         private readonly Label _titleLabel;
         private readonly Label _subtitleLabel;
         private readonly Label _headerPublicIpLabel;
+        private readonly Label _headerPublicIpLocationLabel;
         private readonly Label _adapterCountLabel;
         private readonly Label _listHintLabel;
         private Label _licenseLabel;
@@ -169,11 +189,14 @@ namespace MacRando
         private readonly Label _networkModeLabel;
         private readonly Label _networkLinkLabel;
         private readonly Label _publicIpLabel;
+        private readonly Label _publicIpLocationLabel;
         private readonly Label _vpnHintLabel;
         private readonly Label _operationStatusLabel;
         private readonly Label _safetySummaryLabel;
 
         private AdapterInfo _selectedAdapter;
+        private string _lastPublicIpValue;
+        private NetworkIdentity _lastNetworkIdentity;
         private bool _allowClose;
         private bool _suppressAdapterSelectionEvents;
         private bool _isBusy;
@@ -302,6 +325,14 @@ namespace MacRando
             _subtitleLabel.Size = new Size(360, 22);
             _toolTip.SetToolTip(_subtitleLabel, "Version " + AppInfo.DisplayVersion);
             _headerPublicIpLabel = MakeMutedLabel("Public IP: checking...");
+            // The header is the only part of the window that is never scrolled or collapsed,
+            // and the "Public IP and VPN" card that also shows the address sits at the bottom
+            // of a scroll area whose viewport is a fraction of its content. A location that
+            // is only shown down there is a location nobody finds, so the header carries it
+            // too, on the same stacked pattern the title and subtitle already use.
+            _headerPublicIpLocationLabel = MakeMutedLabel(string.Empty);
+            _headerPublicIpLocationLabel.AutoSize = false;
+            _headerPublicIpLocationLabel.AutoEllipsis = true;
             _adapterCountLabel = MakeMutedLabel("0 adapters");
             _listHintLabel = MakeMutedLabel("Select an adapter to view its details.");
             _selectedTitleLabel = MakeTitle("No adapter selected");
@@ -316,6 +347,10 @@ namespace MacRando
             _networkModeLabel = MakeValueLabel("—");
             _networkLinkLabel = MakeMutedLabel("—");
             _publicIpLabel = MakeValueLabel("Unavailable");
+            // The location used to exist only as a tooltip on the public IP label, which made
+            // an opt-in feature look permanently broken: nothing on screen changed when it
+            // was enabled. It is now a row of its own, in the same card as the address.
+            _publicIpLocationLabel = MakeMutedLabel(PublicIpLocationOptInHint);
             _vpnHintLabel = MakeMutedLabel("No VPN profiles configured in Windows Settings.");
             _operationStatusLabel = MakeMutedLabel("Ready.");
             _safetySummaryLabel = MakeMutedLabel("MAC and IP changes are saved with a restore profile before they are applied. Verified changes are restored automatically when you exit.");
@@ -345,6 +380,22 @@ namespace MacRando
             _showPublicIpLocationCheckBox = new CheckBox { Text = "Show public IP location (sends IP to ipinfo.io)", AutoSize = true, UseVisualStyleBackColor = false };
             _showPublicIpLocationCheckBox.CheckedChanged += (sender, args) =>
             {
+                // The row has to react in the same click. Leaving it showing the previous
+                // wording until some later refresh lands is what made this read as broken:
+                // a row that never visibly changes is indistinguishable from one that is
+                // not wired to the checkbox at all.
+                if (_showPublicIpLocationCheckBox.Checked)
+                {
+                    _publicIpLocationLabel.Text = PublicIpLocationLookingUpHint;
+                    _headerPublicIpLocationLabel.Text = PublicIpLocationLookingUpShort;
+                    _toolTip.SetToolTip(_publicIpLocationLabel, PublicIpLocationLookingUpHint);
+                    _toolTip.SetToolTip(_headerPublicIpLocationLabel, PublicIpLocationLookingUpHint);
+                }
+                else
+                {
+                    RefreshPublicIpLocationRow();
+                }
+
                 if (PublicIpLocationConsentChanged != null)
                 {
                     PublicIpLocationConsentChanged(this, EventArgs.Empty);
@@ -562,7 +613,20 @@ namespace MacRando
             if (_showPublicIpLocationCheckBox != null)
             {
                 _showPublicIpLocationCheckBox.Checked = enabled;
+                // The Location row's wording depends on this setting, so restoring the
+                // preference at startup has to re-render it or the row would keep the
+                // "off" wording until the next refresh.
+                RefreshPublicIpLocationRow();
             }
+        }
+
+        private void RefreshPublicIpLocationRow()
+        {
+            if (_publicIpLocationLabel == null)
+            {
+                return;
+            }
+            SetPublicIp(_lastPublicIpValue, _lastNetworkIdentity);
         }
 
         public void SetBackupAvailable(bool available)
@@ -579,14 +643,24 @@ namespace MacRando
 
         public void SetPublicIp(string value, NetworkIdentity networkIdentity = null)
         {
+            _lastPublicIpValue = value;
+            _lastNetworkIdentity = networkIdentity;
             string display = string.IsNullOrWhiteSpace(value) ? "Unavailable" : value;
             _publicIpLabel.Text = display;
             _headerPublicIpLabel.Text = "Public IP: " + display;
 
             string tooltip = "Public IP: " + display;
-            if (networkIdentity != null)
+
+            // The opt-in is read before the location data is used, and the data is only
+            // shown while it is on. A refresh in flight when the box is unticked can still
+            // hand over a populated identity, and displaying that would leave the location
+            // sitting on screen after the user had asked for it to stop. Turning a privacy
+            // setting off has to take effect immediately, not at the next refresh.
+            bool optedIn = _showPublicIpLocationCheckBox != null && _showPublicIpLocationCheckBox.Checked;
+
+            var geoParts = new List<string>();
+            if (optedIn && networkIdentity != null)
             {
-                var geoParts = new List<string>();
                 if (!string.IsNullOrWhiteSpace(networkIdentity.PublicIpCountry))
                     geoParts.Add("Country: " + networkIdentity.PublicIpCountry);
                 if (!string.IsNullOrWhiteSpace(networkIdentity.PublicIpRegion))
@@ -599,15 +673,124 @@ namespace MacRando
                     geoParts.Add("ASN: " + networkIdentity.PublicIpAsn);
                 if (!string.IsNullOrWhiteSpace(networkIdentity.PublicIpTimezone))
                     geoParts.Add("Timezone: " + networkIdentity.PublicIpTimezone);
-
-                if (geoParts.Count > 0)
-                {
-                    tooltip += Environment.NewLine + string.Join(Environment.NewLine, geoParts);
-                }
             }
 
+            if (geoParts.Count > 0)
+            {
+                tooltip += Environment.NewLine + string.Join(Environment.NewLine, geoParts);
+            }
+
+            // "Not switched on" and "switched on but the lookup failed" are different
+            // problems with different fixes, so the row must not collapse them into one
+            // message.
+            string locationText;
+            if (geoParts.Count > 0)
+            {
+                locationText = DescribePublicIpLocation(networkIdentity, geoParts);
+            }
+            else if (optedIn)
+            {
+                locationText = PublicIpLocationUnavailableHint;
+            }
+            else
+            {
+                locationText = PublicIpLocationOptInHint;
+            }
+
+            _publicIpLocationLabel.Text = locationText;
+            // The header gets a shorter form: the same facts, minus the provider, because
+            // the column is 220px and a truncated line helps nobody. The full text is on
+            // the tooltip and in the card below.
+            _headerPublicIpLocationLabel.Text = geoParts.Count > 0
+                ? DescribePublicIpLocationShort(networkIdentity, geoParts)
+                : (optedIn ? PublicIpLocationUnavailableShort : string.Empty);
             _toolTip.SetToolTip(_publicIpLabel, tooltip);
             _toolTip.SetToolTip(_headerPublicIpLabel, tooltip);
+            _toolTip.SetToolTip(_headerPublicIpLocationLabel, geoParts.Count > 0
+                ? "Public IP location, from ipinfo.io." + Environment.NewLine
+                    + string.Join(Environment.NewLine, geoParts)
+                : locationText);
+            _toolTip.SetToolTip(_publicIpLocationLabel, geoParts.Count > 0
+                ? "Public IP location, from ipinfo.io." + Environment.NewLine
+                    + string.Join(Environment.NewLine, geoParts)
+                : locationText);
+        }
+
+        /// <summary>
+        /// The header form of the location: place and network number, no provider name.
+        /// </summary>
+        internal static string DescribePublicIpLocationShort(NetworkIdentity identity, List<string> geoParts)
+        {
+            if (geoParts == null || geoParts.Count == 0)
+            {
+                return PublicIpLocationUnavailableShort;
+            }
+
+            string text = DescribePublicIpPlace(identity);
+            if (text == "Location unknown")
+            {
+                text = "Location unknown";
+            }
+
+            string asn = identity == null ? null : identity.PublicIpAsn;
+            if (!string.IsNullOrWhiteSpace(asn))
+            {
+                text += "  (" + asn + ")";
+            }
+            return text;
+        }
+
+        /// <summary>
+        /// The text of the Location row.
+        ///
+        /// This exists because the feature used to report its result only as a tooltip, and
+        /// a tooltip is not something a user reads looking for the answer. Enabling the
+        /// setting produced no visible change on screen, which reads exactly like a broken
+        /// feature. The row is always present and always says which of the three things is
+        /// true: not opted in, opted in but the lookup failed, or the actual location.
+        /// </summary>
+        internal static string DescribePublicIpLocation(NetworkIdentity identity, List<string> geoParts)
+        {
+            if (geoParts == null || geoParts.Count == 0)
+            {
+                return PublicIpLocationUnavailableHint;
+            }
+
+            string text = DescribePublicIpPlace(identity);
+
+            string isp = identity == null ? null : identity.PublicIpIsp;
+            string asn = identity == null ? null : identity.PublicIpAsn;
+            if (!string.IsNullOrWhiteSpace(isp))
+            {
+                text += "  -  " + (string.IsNullOrWhiteSpace(asn) ? isp : isp + " (" + asn + ")");
+            }
+            else if (!string.IsNullOrWhiteSpace(asn))
+            {
+                text += "  -  " + asn;
+            }
+
+            return text;
+        }
+
+        /// <summary>
+        /// "City, Region, Country", skipping whatever the service did not return. Place comes
+        /// first because that is what a person is actually asking for; the network operator
+        /// is a detail, and in the header there is no room for it.
+        /// </summary>
+        private static string DescribePublicIpPlace(NetworkIdentity identity)
+        {
+            var place = new List<string>();
+            Action<string> add = delegate(string value)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    place.Add(value.Trim());
+                }
+            };
+            add(identity == null ? null : identity.PublicIpCity);
+            add(identity == null ? null : identity.PublicIpRegion);
+            add(identity == null ? null : identity.PublicIpCountry);
+            return place.Count > 0 ? string.Join(", ", place.ToArray()) : "Location unknown";
         }
 
         public void SetStatus(string value)
@@ -816,6 +999,15 @@ namespace MacRando
                 "The original address is recorded so you can still get back to it.");
             Accessibility.Describe(_headerPublicIpLabel, "Public IP address", AccessibleRole.Text,
                 "The public IP address seen by websites from this machine.");
+            Accessibility.Describe(_headerPublicIpLocationLabel, "Public IP location", AccessibleRole.Text,
+                "The approximate city, region, and country of the public IP address, with the " +
+                "network number. Empty until you enable \"Show public IP location\" in Safety " +
+                "and status, which sends the address to ipinfo.io.");
+            Accessibility.Describe(_publicIpLocationLabel, "Public IP location", AccessibleRole.Text,
+                "The approximate city, region, and country of the public IP address, with the " +
+                "internet provider and its network number. Shown only after you enable " +
+                "\"Show public IP location\" in Safety and status, which sends the address to " +
+                "ipinfo.io.");
             Accessibility.Describe(_titleLabel, "MacRando", AccessibleRole.Text,
                 "Application title and version.");
             Accessibility.Describe(_subtitleLabel, "Adapter changer description", AccessibleRole.Text,
@@ -869,7 +1061,43 @@ namespace MacRando
             _headerPublicIpLabel.Anchor = AnchorStyles.Right | AnchorStyles.Top;
             _headerPublicIpLabel.Size = new Size(180, 28);
             _headerPublicIpLabel.TextAlign = ContentAlignment.MiddleRight;
-            layout.Controls.Add(_headerPublicIpLabel, 1, 0);
+
+            // Address above, location below, in one cell so the edge of the window can never
+            // show the address without the location sitting under it. Shaped like titleLayout
+            // above, which is the one nested table in this header that is known to size
+            // itself: AutoSize has to be on, because a Dock=Top table with AutoSize off is
+            // never given a height and falls back to its default 100px, which pushed the
+            // location line half a header away from the address.
+            var headerPublicIpLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 2,
+                Padding = Padding.Empty,
+                Margin = Padding.Empty
+            };
+            headerPublicIpLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            headerPublicIpLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            headerPublicIpLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _headerPublicIpLabel.Anchor = AnchorStyles.None;
+            _headerPublicIpLabel.Dock = DockStyle.Top;
+            _headerPublicIpLabel.AutoSize = false;
+            _headerPublicIpLabel.Height = 20;
+            _headerPublicIpLabel.AutoEllipsis = true;
+            _headerPublicIpLabel.Margin = Padding.Empty;
+            _headerPublicIpLabel.TextAlign = ContentAlignment.MiddleRight;
+            _headerPublicIpLocationLabel.Anchor = AnchorStyles.None;
+            _headerPublicIpLocationLabel.Dock = DockStyle.Top;
+            _headerPublicIpLocationLabel.AutoSize = false;
+            _headerPublicIpLocationLabel.Height = 16;
+            _headerPublicIpLocationLabel.AutoEllipsis = true;
+            _headerPublicIpLocationLabel.Margin = Padding.Empty;
+            _headerPublicIpLocationLabel.TextAlign = ContentAlignment.MiddleRight;
+            headerPublicIpLayout.Controls.Add(_headerPublicIpLabel, 0, 0);
+            headerPublicIpLayout.Controls.Add(_headerPublicIpLocationLabel, 0, 1);
+            layout.Controls.Add(headerPublicIpLayout, 1, 0);
             _darkModeCheckBox.Anchor = AnchorStyles.Right | AnchorStyles.Top;
             layout.Controls.Add(_darkModeCheckBox, 2, 0);
             _refreshButton.Anchor = AnchorStyles.Top;
@@ -1424,17 +1652,44 @@ namespace MacRando
 
             TableLayoutPanel vpnBody;
             TableLayoutPanel vpnCard = CreateCard("Public IP and VPN", 2, 4, out vpnBody);
-            SetBodyRows(vpnBody, 22, 32, 40, -1);
+            SetBodyRows(vpnBody, 22, 50, 40, -1);
             AddCellLabel(vpnBody, "Public IP", 0, 0);
             Label vpnProfileLabel = AddCellLabel(vpnBody, "Windows VPN profile", 1, 0);
             vpnProfileLabel.Dock = DockStyle.Fill;
             ConfigureValueCell(_publicIpLabel);
+            ConfigureValueCell(_publicIpLocationLabel);
+
+            // The address and its location share one cell, stacked. Given a row of their own
+            // they could be split by the edge of the scrolling details pane at some window
+            // sizes, which puts the location below the fold while the address stays visible.
+            // Keeping them in one cell makes that impossible, and the two lines read together
+            // anyway.
+            var publicIpCell = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = false,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 2,
+                Padding = Padding.Empty,
+                Margin = Padding.Empty
+            };
+            publicIpCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            // Absolute, not percent. A percent row style inside a card that sizes to its
+            // content has no defined preferred height, and the card's own AutoSize then
+            // grows to fit it, which pushed the whole card below the fold of the scrolling
+            // details pane and hid the public IP along with it.
+            publicIpCell.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
+            publicIpCell.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
+            publicIpCell.Controls.Add(_publicIpLabel, 0, 0);
+            publicIpCell.Controls.Add(_publicIpLocationLabel, 0, 1);
+
             _vpnCombo.Dock = DockStyle.Fill;
             _vpnCombo.Margin = Padding.Empty;
             _vpnHintLabel.Dock = DockStyle.Fill;
             _vpnHintLabel.TextAlign = ContentAlignment.TopLeft;
             _vpnHintLabel.Margin = new Padding(0, 8, 0, 0);
-            vpnBody.Controls.Add(_publicIpLabel, 0, 1);
+            vpnBody.Controls.Add(publicIpCell, 0, 1);
             vpnBody.Controls.Add(_vpnCombo, 1, 1);
             vpnBody.Controls.Add(_vpnHintLabel, 1, 2);
             vpnBody.Controls.Add(CreateActionGrid(2, _connectVpnButton, _disconnectVpnButton), 0, 3);
@@ -1854,8 +2109,10 @@ namespace MacRando
             _subtitleLabel.ForeColor = secondary;
             _licenseLabel.ForeColor = secondary;
             _headerPublicIpLabel.ForeColor = secondary;
+            _headerPublicIpLocationLabel.ForeColor = secondary;
             _currentMacLabel.ForeColor = accent;
             _publicIpLabel.ForeColor = accent;
+            _publicIpLocationLabel.ForeColor = secondary;
             _operationStatusLabel.ForeColor = text;
             if (!themeSaved && IsHandleCreated)
             {
