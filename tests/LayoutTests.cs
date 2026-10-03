@@ -35,6 +35,7 @@ internal static class LayoutTests
         try
         {
             NothingOverlapsAtAnySize();
+            NoLabelIsShorterThanItsText();
             NoControlIsClippedAtAnySize();
             ThePublicIpLocationIsReportedOnScreen();
             TheAdapterListIsAlwaysUsable();
@@ -811,8 +812,91 @@ internal static class LayoutTests
                 Check(headerLocation.Text.Length == 0,
                     "the header still shows a location after the setting was turned off; it reads: "
                         + headerLocation.Text);
+
+                // A failed address lookup and a failed location lookup are different problems
+                // and were reported with the same words, which pointed the reader at the
+                // location service even when the address had never arrived.
+                box.Checked = true;
+                form.SetPublicIp(DashboardForm.PublicIpUnavailable, new NetworkIdentity());
+                Check(location.Text.IndexOf("public IP address", StringComparison.OrdinalIgnoreCase) >= 0,
+                    "when the address could not be fetched the row should blame the address lookup, but it reads: "
+                        + location.Text);
+                Check(location.Text.IndexOf("location service", StringComparison.OrdinalIgnoreCase) < 0,
+                    "when the address could not be fetched the row blames the location service; it reads: "
+                        + location.Text);
+                Check(headerLocation.Text.IndexOf("Public IP", StringComparison.OrdinalIgnoreCase) >= 0,
+                    "the header should say the address is unavailable, but it reads: " + headerLocation.Text);
+
+                // And the address arriving must clear it again.
+                form.SetPublicIp("203.0.113.9", new NetworkIdentity());
+                Check(location.Text.IndexOf("location service", StringComparison.OrdinalIgnoreCase) >= 0,
+                    "with the address present and the location missing, the row should blame the location lookup; it reads: "
+                        + location.Text);
             }
         });
+    }
+
+    /// <summary>
+    /// No label may be shorter than the text it has to draw.
+    ///
+    /// An overlap audit cannot catch this: a label clipped inside its own bounds still
+    /// has a correct rectangle, so nothing overlaps anything. The header's public IP and
+    /// location lines were given fixed pixel heights, which were correct only at the
+    /// display scaling they were written at. At 150% they were 20 and 16 pixels against
+    /// a needed 21 and 18, and both lines lost their bottom edge.
+    /// </summary>
+    private static void NoLabelIsShorterThanItsText()
+    {
+        RunOnUiThread(delegate
+        {
+            foreach (float scale in new[] { 1.0f, 1.25f, 1.5f, 1.75f, 2.0f })
+            {
+                foreach (Size size in new[] { new Size(1120, 720), new Size(1680, 1105) })
+                {
+                    using (DashboardForm form = new DashboardForm())
+                    {
+                        Populate(form);
+                        form.Size = size;
+                        Settle(form);
+                        form.Scale(new SizeF(scale, scale));
+                        Settle(form);
+                        form.SetPublicIp("203.0.113.9", new NetworkIdentity
+                        {
+                            PublicIpCity = "Clermont",
+                            PublicIpRegion = "Florida",
+                            PublicIpCountry = "US",
+                            PublicIpIsp = "Charter Communications, Inc",
+                            PublicIpAsn = "AS33363"
+                        });
+                        Settle(form);
+
+                        foreach (Control c in AllControls(form))
+                        {
+                            Label label = c as Label;
+                            if (label == null || !label.Visible)
+                            {
+                                continue;
+                            }
+                            if (string.IsNullOrEmpty(label.Text))
+                            {
+                                continue;
+                            }
+                            int needed = label.PreferredHeight;
+                            Check(label.Height >= needed,
+                                "the label \"" + Shorten(label.Text) + "\" is " + label.Height
+                                    + "px tall but needs " + needed + "px to draw its text, at "
+                                    + size.Width + "x" + size.Height + " scaled " + scale + "x");
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    private static string Shorten(string value)
+    {
+        value = value.Replace(Environment.NewLine, " ");
+        return value.Length > 32 ? value.Substring(0, 32) + "..." : value;
     }
 
     private static IEnumerable<Control> AllControls(Control root)

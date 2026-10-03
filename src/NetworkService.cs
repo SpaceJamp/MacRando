@@ -28,6 +28,18 @@ namespace MacRando
         private const int PowerShellTimeoutMilliseconds = 30000;
         private const int VpnTimeoutMilliseconds = 45000;
         private static readonly HttpClient PublicIpClient = CreatePublicIpClient();
+
+        /// <summary>
+        /// Public IP providers, tried in order. Both return the bare address as the whole
+        /// response body. Different operators, so a failure of one says nothing about the
+        /// other; ipinfo.io also answers the geolocation request, so on a partial outage
+        /// the two features fail independently rather than together.
+        /// </summary>
+        private static readonly string[] PublicIpProviders =
+        {
+            "https://api.ipify.org",
+            "https://ipinfo.io/ip"
+        };
         private readonly IPowerShellRunner _runner;
 
         public NetworkService()
@@ -960,20 +972,45 @@ if ($code -ne 0) {
             return RunNonJsonAsync(VpnActionScript, environment, VpnTimeoutMilliseconds);
         }
 
+        /// <summary>
+        /// Fetches the public IP address.
+        ///
+        /// Two providers, tried in order, because one provider means one flaky host takes
+        /// the whole feature down. This is not hypothetical: a single transient
+        /// HttpRequestException from api.ipify.org left the dashboard reading "Unavailable"
+        /// for the rest of the session, with nothing retrying it and no other source to fall
+        /// back on. The second provider is a different operator on different infrastructure,
+        /// so it fails for different reasons rather than the same ones.
+        /// </summary>
         public async Task<string> GetPublicIpAsync()
         {
-            using (HttpResponseMessage response = await PublicIpClient.GetAsync("https://api.ipify.org"))
+            var failures = new List<string>();
+            foreach (string url in PublicIpProviders)
             {
-                response.EnsureSuccessStatusCode();
-                string value = (await response.Content.ReadAsStringAsync()).Trim();
-                IPAddress parsed;
-                if (!IPAddress.TryParse(value, out parsed))
+                try
                 {
-                    throw new InvalidDataException("The public IP service returned an invalid address.");
+                    using (HttpResponseMessage response = await PublicIpClient.GetAsync(url))
+                    {
+                        response.EnsureSuccessStatusCode();
+                        string value = (await response.Content.ReadAsStringAsync()).Trim();
+                        IPAddress parsed;
+                        if (IPAddress.TryParse(value, out parsed))
+                        {
+                            return value;
+                        }
+                        failures.Add(url + " returned something that is not an address");
+                    }
                 }
-
-                return value;
+                catch (Exception error)
+                {
+                    // Recorded per provider so the log says which hosts were tried and why
+                    // each one failed, instead of one opaque "the lookup failed".
+                    failures.Add(url + ": " + error.Message);
+                }
             }
+
+            throw new InvalidDataException(
+                "Every public IP provider failed. " + string.Join("; ", failures.ToArray()));
         }
 
         /// <summary>

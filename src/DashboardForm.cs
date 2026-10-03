@@ -130,6 +130,22 @@ namespace MacRando
         /// <summary>Header variant: 220px wide, so no full sentences.</summary>
         private const string PublicIpLocationUnavailableShort = "Location unavailable";
 
+        /// <summary>
+        /// Used when the address itself could not be fetched. Blaming the location service
+        /// in that case points the reader at the wrong thing: there is no location to look
+        /// up yet, because there is no address.
+        /// </summary>
+        private const string PublicIpUnavailableHint =
+            "The public IP address could not be fetched. Press Refresh to try again.";
+
+        private const string PublicIpUnavailableShort = "Public IP unavailable";
+
+        /// <summary>
+        /// The sentinel the tray context writes when an address could not be fetched. Both
+        /// sides compare against this, so the two can never drift apart.
+        /// </summary>
+        public const string PublicIpUnavailable = "Unavailable";
+
         private const string PublicIpLocationLookingUpShort = "Locating...";
 
         private readonly ListView _adapterList;
@@ -190,6 +206,7 @@ namespace MacRando
         private readonly Label _networkLinkLabel;
         private readonly Label _publicIpLabel;
         private readonly Label _publicIpLocationLabel;
+        private TableLayoutPanel _publicIpCell;
         private readonly Label _vpnHintLabel;
         private readonly Label _operationStatusLabel;
         private readonly Label _safetySummaryLabel;
@@ -346,7 +363,7 @@ namespace MacRando
             _networkIpLabel = MakeValueLabel("—");
             _networkModeLabel = MakeValueLabel("—");
             _networkLinkLabel = MakeMutedLabel("—");
-            _publicIpLabel = MakeValueLabel("Unavailable");
+            _publicIpLabel = MakeValueLabel(PublicIpUnavailable);
             // The location used to exist only as a tooltip on the public IP label, which made
             // an opt-in feature look permanently broken: nothing on screen changed when it
             // was enabled. It is now a row of its own, in the same card as the address.
@@ -645,7 +662,7 @@ namespace MacRando
         {
             _lastPublicIpValue = value;
             _lastNetworkIdentity = networkIdentity;
-            string display = string.IsNullOrWhiteSpace(value) ? "Unavailable" : value;
+            string display = string.IsNullOrWhiteSpace(value) ? PublicIpUnavailable : value;
             _publicIpLabel.Text = display;
             _headerPublicIpLabel.Text = "Public IP: " + display;
 
@@ -657,6 +674,11 @@ namespace MacRando
             // sitting on screen after the user had asked for it to stop. Turning a privacy
             // setting off has to take effect immediately, not at the next refresh.
             bool optedIn = _showPublicIpLocationCheckBox != null && _showPublicIpLocationCheckBox.Checked;
+
+            // Two different services are involved and they fail independently. If the
+            // address never arrived there is nothing to look up, so reporting that the
+            // location service failed sends the reader after the wrong one.
+            bool addressMissing = display == PublicIpUnavailable;
 
             var geoParts = new List<string>();
             if (optedIn && networkIdentity != null)
@@ -688,6 +710,10 @@ namespace MacRando
             {
                 locationText = DescribePublicIpLocation(networkIdentity, geoParts);
             }
+            else if (addressMissing)
+            {
+                locationText = PublicIpUnavailableHint;
+            }
             else if (optedIn)
             {
                 locationText = PublicIpLocationUnavailableHint;
@@ -698,12 +724,14 @@ namespace MacRando
             }
 
             _publicIpLocationLabel.Text = locationText;
+            SizeTextLabelsToFit();
             // The header gets a shorter form: the same facts, minus the provider, because
             // the column is 220px and a truncated line helps nobody. The full text is on
             // the tooltip and in the card below.
             _headerPublicIpLocationLabel.Text = geoParts.Count > 0
                 ? DescribePublicIpLocationShort(networkIdentity, geoParts)
-                : (optedIn ? PublicIpLocationUnavailableShort : string.Empty);
+                : (addressMissing ? PublicIpUnavailableShort
+                    : optedIn ? PublicIpLocationUnavailableShort : string.Empty);
             _toolTip.SetToolTip(_publicIpLabel, tooltip);
             _toolTip.SetToolTip(_headerPublicIpLabel, tooltip);
             _toolTip.SetToolTip(_headerPublicIpLocationLabel, geoParts.Count > 0
@@ -791,6 +819,57 @@ namespace MacRando
             add(identity == null ? null : identity.PublicIpRegion);
             add(identity == null ? null : identity.PublicIpCountry);
             return place.Count > 0 ? string.Join(", ", place.ToArray()) : "Location unknown";
+        }
+
+        /// <summary>
+        /// Gives the four public IP labels exactly the height their text needs.
+        ///
+        /// Heights are never written as literals. Two separate clipping bugs came from
+        /// doing that: the header lines were given 20 and 16 pixels when the font wanted 21
+        /// and 18, and the card cell was given a 24 pixel row when the value wanted 25. An
+        /// overlap audit cannot see either, because a label clipped inside its own bounds
+        /// still has a perfectly good rectangle.
+        ///
+        /// It is also not enough to size these labels where they are built. The value labels
+        /// set their own font in their factory, but the header labels inherit the form
+        /// default, which is not final until the theme has run. Measuring here means both
+        /// kinds of label are measured against the font that is actually in effect.
+        /// </summary>
+        private void SizeTextLabelsToFit()
+        {
+            var labels = new[] { _headerPublicIpLabel, _headerPublicIpLocationLabel, _publicIpLabel, _publicIpLocationLabel };
+            foreach (Label label in labels)
+            {
+                if (label == null || !label.Visible && label.Height == 0)
+                {
+                    continue;
+                }
+                int needed = label.PreferredHeight;
+                if (needed > 0 && label.Height != needed)
+                {
+                    label.Height = needed;
+                }
+            }
+
+            // The card's cell holds the two value labels stacked, so its rows have to
+            // follow them or the second line is pushed out of the card.
+            if (_publicIpCell != null && _publicIpCell.RowCount == 2)
+            {
+                for (int row = 0; row < 2; row++)
+                {
+                    Control control = _publicIpCell.GetControlFromPosition(0, row);
+                    Label label = control as Label;
+                    if (label == null)
+                    {
+                        continue;
+                    }
+                    int needed = label.PreferredHeight;
+                    if (needed > 0 && _publicIpCell.RowStyles[row].Height != needed)
+                    {
+                        _publicIpCell.RowStyles[row] = new RowStyle(SizeType.Absolute, needed);
+                    }
+                }
+            }
         }
 
         public void SetStatus(string value)
@@ -1081,17 +1160,21 @@ namespace MacRando
             headerPublicIpLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             headerPublicIpLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             headerPublicIpLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            // No height is set on either label. Fixed pixel heights are wrong at
+            // every display scaling except the one they were written at, and reading
+            // PreferredHeight here is no better because this runs before the theme has
+            // applied its fonts, so it would measure the wrong font. Both rows are
+            // SizeType.AutoSize instead, which makes the table measure each label
+            // against whatever font is actually in effect when the layout runs.
             _headerPublicIpLabel.Anchor = AnchorStyles.None;
             _headerPublicIpLabel.Dock = DockStyle.Top;
             _headerPublicIpLabel.AutoSize = false;
-            _headerPublicIpLabel.Height = 20;
             _headerPublicIpLabel.AutoEllipsis = true;
             _headerPublicIpLabel.Margin = Padding.Empty;
             _headerPublicIpLabel.TextAlign = ContentAlignment.MiddleRight;
             _headerPublicIpLocationLabel.Anchor = AnchorStyles.None;
             _headerPublicIpLocationLabel.Dock = DockStyle.Top;
             _headerPublicIpLocationLabel.AutoSize = false;
-            _headerPublicIpLocationLabel.Height = 16;
             _headerPublicIpLocationLabel.AutoEllipsis = true;
             _headerPublicIpLocationLabel.Margin = Padding.Empty;
             _headerPublicIpLocationLabel.TextAlign = ContentAlignment.MiddleRight;
@@ -1652,7 +1735,7 @@ namespace MacRando
 
             TableLayoutPanel vpnBody;
             TableLayoutPanel vpnCard = CreateCard("Public IP and VPN", 2, 4, out vpnBody);
-            SetBodyRows(vpnBody, 22, 50, 40, -1);
+            SetBodyRows(vpnBody, 22, -1, 40, -1);
             AddCellLabel(vpnBody, "Public IP", 0, 0);
             Label vpnProfileLabel = AddCellLabel(vpnBody, "Windows VPN profile", 1, 0);
             vpnProfileLabel.Dock = DockStyle.Fill;
@@ -1664,8 +1747,8 @@ namespace MacRando
             // sizes, which puts the location below the fold while the address stays visible.
             // Keeping them in one cell makes that impossible, and the two lines read together
             // anyway.
-            var publicIpCell = new TableLayoutPanel
-            {
+            _publicIpCell = new TableLayoutPanel
+                {
                 Dock = DockStyle.Fill,
                 AutoSize = false,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
@@ -1674,22 +1757,23 @@ namespace MacRando
                 Padding = Padding.Empty,
                 Margin = Padding.Empty
             };
-            publicIpCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            // Absolute, not percent. A percent row style inside a card that sizes to its
-            // content has no defined preferred height, and the card's own AutoSize then
-            // grows to fit it, which pushed the whole card below the fold of the scrolling
-            // details pane and hid the public IP along with it.
-            publicIpCell.RowStyles.Add(new RowStyle(SizeType.Absolute, 24F));
-            publicIpCell.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
-            publicIpCell.Controls.Add(_publicIpLabel, 0, 0);
-            publicIpCell.Controls.Add(_publicIpLocationLabel, 0, 1);
+            _publicIpCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            // AutoSize, for the same reason the header stack uses it and for the same
+            // reason it must not be percent: a percent row style inside a card that sizes
+            // to its own content has no defined preferred height, and the card's AutoSize
+            // then grows to fit it, which pushed the whole card below the fold of the
+            // scrolling details pane and hid the public IP along with it.
+            _publicIpCell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _publicIpCell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _publicIpCell.Controls.Add(_publicIpLabel, 0, 0);
+            _publicIpCell.Controls.Add(_publicIpLocationLabel, 0, 1);
 
             _vpnCombo.Dock = DockStyle.Fill;
             _vpnCombo.Margin = Padding.Empty;
             _vpnHintLabel.Dock = DockStyle.Fill;
             _vpnHintLabel.TextAlign = ContentAlignment.TopLeft;
             _vpnHintLabel.Margin = new Padding(0, 8, 0, 0);
-            vpnBody.Controls.Add(publicIpCell, 0, 1);
+            vpnBody.Controls.Add(_publicIpCell, 0, 1);
             vpnBody.Controls.Add(_vpnCombo, 1, 1);
             vpnBody.Controls.Add(_vpnHintLabel, 1, 2);
             vpnBody.Controls.Add(CreateActionGrid(2, _connectVpnButton, _disconnectVpnButton), 0, 3);
@@ -2113,6 +2197,9 @@ namespace MacRando
             _currentMacLabel.ForeColor = accent;
             _publicIpLabel.ForeColor = accent;
             _publicIpLocationLabel.ForeColor = secondary;
+            // Fonts are final by this point, which is the only moment these labels can be
+            // measured against the font actually in effect.
+            SizeTextLabelsToFit();
             _operationStatusLabel.ForeColor = text;
             if (!themeSaved && IsHandleCreated)
             {

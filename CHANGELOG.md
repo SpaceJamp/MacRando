@@ -1,5 +1,22 @@
 # MacRando Changelog
 
+## 1.16.6 - 2026.10
+
+### Fixed
+
+- **Text was clipped in the header.** The public IP and location lines were given fixed pixel heights of 20 and 16, but the font needed 21 and 18, so both lines lost their bottom edge and the location looked sliced off. Label heights are now measured from the font in effect rather than written as literals. The same mistake was also clipping the public IP value in the "Public IP and VPN" card by one pixel.
+- **The wrong service was blamed when an address could not be fetched.** The location row reported "The location service could not be reached" even when the failure had been the public IP lookup and no address had ever arrived. There was nothing to look up yet. The row and the header now distinguish the two.
+- **One flaky provider could disable the feature for the whole session.** A single transient failure from `api.ipify.org` left the dashboard reading "Unavailable" with nothing retrying it. A second provider, on a different operator and different infrastructure, is now tried when the first fails, and the log names each host and why it failed.
+
+### Tests
+
+- `NoLabelIsShorterThanItsText` walks every visible label at five display scalings and two window sizes and fails if any is shorter than the text it must draw. An overlap audit cannot catch this class of bug: a label clipped inside its own bounds still has a correct rectangle, so nothing overlaps anything.
+- The existing `ThePublicIpLocationIsReportedOnScreen` was extended to assert the address failure and the location failure are worded differently, and that a recovered address clears the message.
+
+### Notes
+
+- `update-helper-e2e` failed once and passed on two subsequent runs without any change to the update path. It looks timing-sensitive rather than broken, and is not caused by anything in this release.
+
 ## 1.16.5 - 2026.10
 
 ### Fixed
