@@ -40,6 +40,7 @@ $sources = @(
     (Join-Path $root 'src\Accessibility.cs'),
     (Join-Path $root 'tests\AccessibilityTests.cs'),
     (Join-Path $root 'tests\LayoutTests.cs'),
+    (Join-Path $root 'tests\ControlSweepTests.cs'),
     (Join-Path $root 'src\TrayContext.cs'),
     (Join-Path $root 'src\TrayMenuState.cs'),
     (Join-Path $root 'src\UpdateTrust.cs'),

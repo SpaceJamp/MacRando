@@ -278,6 +278,11 @@ internal static class NetworkServiceMockTests
             {
                 return startupResult;
             }
+            int sweepResult = ControlSweepTests.Run();
+            if (sweepResult != 0)
+            {
+                return sweepResult;
+            }
             return 0;
         }
         catch (Exception error)

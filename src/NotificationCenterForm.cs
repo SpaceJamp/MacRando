@@ -254,9 +254,23 @@ namespace MacRando
             var detailsPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(8, 0, 0, 0) };
             detailsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             detailsPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            detailsPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
+            // AutoSize, not a fixed 72. Five action buttons do not fit on one line in this
+            // column, so the panel wraps onto a second row, and a fixed height cannot
+            // accommodate that: at 100% scaling the second row was already clipped by six
+            // pixels, and at 150% it fell entirely outside the row, leaving "Diagnostics"
+            // and "Copy details" invisible and unclickable. The row has to grow with its
+            // contents, which is what the flow panels below this one already do.
+            detailsPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             detailsPanel.Controls.Add(_detailsBox, 0, 0);
-            var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, FlowDirection = FlowDirection.LeftToRight };
+            var actions = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                WrapContents = true,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = Padding.Empty,
+                FlowDirection = FlowDirection.LeftToRight
+            };
             actions.Controls.Add(_openButton);
             actions.Controls.Add(_restoreButton);
             actions.Controls.Add(_retryButton);

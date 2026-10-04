@@ -1,5 +1,19 @@
 # MacRando Changelog
 
+## 1.16.7 - 2026.10
+
+### Fixed
+
+- **Two notification center buttons were unreachable at 150% display scaling.** The five action buttons ("Open dashboard", "Restore now", "Retry", "Diagnostics", "Copy details") sit in a wrapping panel inside a row with a fixed height of 72 pixels. Five buttons do not fit on one line in that column, so the panel wraps onto a second row, and a fixed height cannot accommodate it. At 100% scaling the second row was already clipped by six pixels; at 150% it fell entirely outside the row, leaving **"Diagnostics" and "Copy details" invisible and unclickable**. The row is now sized to its contents, matching the flow panels beside it.
+
+### Tests
+
+- **`control-sweep-tests`**: a new suite that applies six invariants to every control in all three windows, across two themes, three window sizes and two display scalings — 2,004 controls per run. Unlike the existing suites it collects every failure before reporting, so one pass surfaces a batch of distinct defects instead of stopping at the first. The invariants are: usable font, non-zero visible area, within the parent's client area, text not clipped vertically, truncated text still reachable, and interactive controls carrying an accessible name.
+
+### Notes
+
+- The sweep found the notification center fault above on its first run. It also produced two false alarms that were faults in the test rather than the application, both fixed in the suite: the two notification windows were being forced to dashboard-sized dimensions that collapse their filter and preference rows, and a raw `TextRenderer` measurement disagreed with the label's own layout by a pixel or two and was reporting clipped text that was not clipped.
+
 ## 1.16.6 - 2026.10
 
 ### Fixed
