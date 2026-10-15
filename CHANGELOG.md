@@ -1,5 +1,19 @@
 # MacRando Changelog
 
+## 1.16.10 - 2026.10
+
+### Fixed
+
+- **Notification popups were cut off at high display scaling.** A popup re-sized itself in fixed 100% pixels every time its buttons changed, so at 125% and 150% the title row was shorter than its text and the bottom of the buttons was cut off, along with the whole second row when they wrapped. The popup now scales its width and message area with the display and sizes its button row from the buttons. Its constructor also turned on display scaling before its controls existed, the fault 1.16.9 fixed in the dashboard and notification center, and now has the same fix. The buttons also no longer keep the oversized height scaling gave them.
+
+### Tests
+
+- `WindowsScaleAfterTheirLayoutIsBuilt` now covers the popup, and `PopupSizesFollowTheDisplayScale` checks the popup's sizing at 100%, 125%, 150% and 200%, that sizes worked out after scaling are not scaled again, and that every button fits its row. Both fail against 1.16.9.
+
+### Notes
+
+- The gap between stacked popups and the screen edge is still 12 pixels and 8 pixels at every scale. Stacking itself uses each popup's real height, so taller popups do not overlap.
+
 ## 1.16.9 - 2026.10
 
 ### Fixed
