@@ -58,6 +58,9 @@ namespace MacRando
 
         public NotificationCenterForm(AppSettings settings, IEnumerable<NotificationHistoryEntry> entries, bool darkMode)
         {
+            // Suspended so display scaling runs once over the finished layout; see the
+            // dashboard constructor for why scaling before the children exist goes wrong.
+            SuspendLayout();
             _settings = settings ?? new AppSettings();
             _darkMode = darkMode;
             Text = "MacRando notification center";
@@ -125,6 +128,8 @@ namespace MacRando
             WireEvents();
             SetEntries(entries);
             ApplyTheme(_darkMode);
+            ResumeLayout(false);
+            PerformLayout();
         }
 
         public void SetEntries(IEnumerable<NotificationHistoryEntry> entries)

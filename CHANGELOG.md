@@ -1,5 +1,21 @@
 # MacRando Changelog
 
+## 1.16.9 - 2026.10
+
+### Fixed
+
+- **Text overlapped and was cut off at 125% and 150% display scaling.** The dashboard turned on display scaling at the top of its constructor, so Windows scaled the window before any of its controls existed. The fonts still grew, because they are sized in points, but every fixed row height, padding and size added afterwards stayed at its 100% value. Text was squeezed into rows too short for it, most visibly below the adapter list and in Safety and status. The "Show public IP location" check box lost its bottom edge, the search box sat on top of "Connected only", "Manual MAC" ran into its text box, and "Dark mode" was truncated. Layout is now suspended for the whole constructor, so scaling runs once over the finished layout. The notification center had the same fault and the same fix.
+- **The pending-restore banner could grow far taller than its text.** Its message label had a fixed size, so its row took whatever height the label happened to have, and scaling enlarged that instead of the text. The label now sizes itself from its text.
+- **The "Star selected" button was clipped at 150%.** It sizes itself to its text, but sat in a fixed-height row. The row now sizes to its contents.
+
+### Tests
+
+- `WindowsScaleAfterTheirLayoutIsBuilt` checks that the dashboard and the notification center suspend layout before turning on display scaling and resume it only once the layout is built, and that both leave layout running. The existing high-DPI checks use `form.Scale`, which scales a finished layout and so could never see this, and a test process runs at 96 DPI, where no scaling happens at all. The test fails against 1.16.8.
+
+### Notes
+
+- Notification popups still size themselves in fixed pixels whenever their actions change, so they are not yet fully scaled at high display scaling. That needs its own change.
+
 ## 1.16.8 - 2026.10
 
 ### Security

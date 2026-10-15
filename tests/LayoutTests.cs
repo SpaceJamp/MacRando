@@ -41,6 +41,7 @@ internal static class LayoutTests
             TheAdapterListIsAlwaysUsable();
             TheListPaneIsNotClippedAtHighDpi();
             NothingOverlapsUnderHighDpiScaling();
+            WindowsScaleAfterTheirLayoutIsBuilt();
             TheTrayMenuIsSensiblyOrdered();
             SectionHeadersAreNotClickable();
             ConstructingATrayContextDoesNotTouchRealData();
@@ -889,6 +890,58 @@ internal static class LayoutTests
                         }
                     }
                 }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Each window must build its whole layout before display scaling runs.
+    ///
+    /// The dashboard set AutoScaleMode at the top of its constructor with layout running,
+    /// so it scaled itself at once, before any child existed. At a real 150% setting the
+    /// fonts grew, because they are in points, but every fixed row height, padding and
+    /// size added afterwards stayed at 100%, and text was squeezed into rows too short for
+    /// it: lines cut off and a text box sitting on the row below. form.Scale, which the
+    /// other high-DPI checks use, scales the finished layout and so could never see it, and
+    /// a test process runs at 96 DPI where no scaling happens at all. So the order itself
+    /// is checked: layout suspended before AutoScaleMode is set, and resumed after the
+    /// layout is built, and the finished form left with layout running.
+    /// </summary>
+    private static void WindowsScaleAfterTheirLayoutIsBuilt()
+    {
+        string root = Environment.GetEnvironmentVariable("MACRANDO_REPO_ROOT") ?? ".";
+        foreach (string[] window in new[]
+        {
+            new[] { "DashboardForm.cs", "public DashboardForm()", "BuildRootLayout();" },
+            new[] { "NotificationCenterForm.cs", "public NotificationCenterForm(", "BuildLayout();" }
+        })
+        {
+            string source = File.ReadAllText(Path.Combine(Path.Combine(root, "src"), window[0]));
+            int constructor = source.IndexOf(window[1], StringComparison.Ordinal);
+            Check(constructor >= 0, window[0] + ": constructor not found");
+            int suspend = source.IndexOf("SuspendLayout();", constructor, StringComparison.Ordinal);
+            int scaleMode = source.IndexOf("AutoScaleMode = AutoScaleMode.", constructor, StringComparison.Ordinal);
+            int built = source.IndexOf(window[2], constructor, StringComparison.Ordinal);
+            int resume = source.IndexOf("ResumeLayout(false);", constructor, StringComparison.Ordinal);
+            Check(suspend >= 0 && scaleMode >= 0 && suspend < scaleMode,
+                window[0] + ": layout must be suspended before AutoScaleMode is set, or the window " +
+                "scales before its controls exist and they stay at 100% at higher display scaling");
+            Check(built >= 0 && resume > built,
+                window[0] + ": layout must be resumed after the layout is built, so scaling covers it");
+        }
+
+        RunOnUiThread(delegate
+        {
+            FieldInfo suspended = typeof(Control).GetField("layoutSuspendCount", BindingFlags.Instance | BindingFlags.NonPublic);
+            using (DashboardForm form = new DashboardForm())
+            {
+                Check(suspended == null || Convert.ToInt32(suspended.GetValue(form)) == 0,
+                    "the dashboard constructor must leave layout running");
+            }
+            using (var center = new NotificationCenterForm(new AppSettings(), new NotificationHistoryEntry[0], false))
+            {
+                Check(suspended == null || Convert.ToInt32(suspended.GetValue(center)) == 0,
+                    "the notification center constructor must leave layout running");
             }
         });
     }
