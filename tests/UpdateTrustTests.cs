@@ -34,6 +34,8 @@ internal static class UpdateTrustTests
             PreferencesAreStillInClearText();
             RedirectsAreResolvedButNeverDowngraded();
             TheLiveManifestIsReachableThroughARedirect();
+            ADamagedSignatureIsRefusedDespiteTheThumbprint();
+            TheHelperScriptIsNeverReadFromDisk();
             Console.WriteLine("update-trust-tests=OK;checks=" + _checks);
             return 0;
         }
@@ -397,5 +399,51 @@ internal static class UpdateTrustTests
                     "an available update should name the version, but the message was: " + result.StatusMessage);
             }
         }
+    }
+
+    private static void ADamagedSignatureIsRefusedDespiteTheThumbprint()
+    {
+        // A signed build modified after signing still carries its signer's certificate, so
+        // Get-AuthenticodeSignature reports the expected thumbprint with HashMismatch. The
+        // thumbprint used to be accepted on its own, which let exactly that through.
+        Check(MacRando.UpdateService.ParseSignatureOutput("HashMismatch|" + SampleThumbprint) == string.Empty,
+            "a HashMismatch signature must be refused even with the expected thumbprint");
+        Check(MacRando.UpdateService.ParseSignatureOutput("NotSigned|" + SampleThumbprint) == string.Empty,
+            "a NotSigned status must be refused");
+        Check(MacRando.UpdateService.ParseSignatureOutput(SampleThumbprint) == string.Empty,
+            "a bare thumbprint with no status must be refused");
+        Check(MacRando.UpdateService.ParseSignatureOutput("Valid|not-a-thumbprint") == string.Empty,
+            "a malformed thumbprint must be refused");
+        Check(MacRando.UpdateService.ParseSignatureOutput("Valid|" + SampleThumbprint.ToLowerInvariant()) == SampleThumbprint,
+            "a valid signature should yield its thumbprint, normalized to upper case");
+        // The publisher certificate is self-signed and lives in TrustedPublisher, so a real
+        // release reports an untrusted chain. Refusing that would break every update.
+        Check(MacRando.UpdateService.ParseSignatureOutput("UnknownError|" + SampleThumbprint) == SampleThumbprint,
+            "an untrusted chain is accepted because the signer is pinned by thumbprint");
+        Check(MacRando.UpdateService.ParseSignatureOutput("NotTrusted|" + SampleThumbprint) == SampleThumbprint,
+            "NotTrusted is a chain failure, not damage, and the signer is pinned");
+    }
+
+    private static void TheHelperScriptIsNeverReadFromDisk()
+    {
+        // The helper runs elevated. Its script used to be written to the per-user temp
+        // folder and started with -File, so any unelevated process could rewrite it first.
+        System.Diagnostics.ProcessStartInfo info = MacRando.UpdateInstaller.BuildHelperStartInfo();
+        Check(info.Arguments.IndexOf("-File", StringComparison.OrdinalIgnoreCase) < 0,
+            "the helper must not be started from a script file");
+        Check(info.Arguments.IndexOf("-EncodedCommand", StringComparison.OrdinalIgnoreCase) >= 0,
+            "the helper should be started with an inline bootstrap");
+        Check(info.RedirectStandardInput, "the script should be delivered through standard input");
+        string encoded = info.Arguments.Substring(info.Arguments.LastIndexOf(' ') + 1);
+        string bootstrap = Encoding.Unicode.GetString(Convert.FromBase64String(encoded));
+        Check(bootstrap == MacRando.UpdateInstaller.HelperBootstrap,
+            "the encoded command should be exactly the bootstrap");
+        Check(bootstrap.IndexOf("[Console]::In", StringComparison.Ordinal) >= 0,
+            "the bootstrap should read the script from standard input");
+
+        string source = File.ReadAllText(Path.Combine(
+            Environment.GetEnvironmentVariable("MACRANDO_REPO_ROOT") ?? ".", "src", "UpdateInstaller.cs"));
+        Check(source.IndexOf("\".ps1\"", StringComparison.Ordinal) < 0,
+            "UpdateInstaller must not write a .ps1 file for the helper");
     }
 }

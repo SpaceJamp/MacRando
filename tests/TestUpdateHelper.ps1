@@ -55,6 +55,9 @@ internal static class ExtractHelper
         MethodInfo method = typeof(MacRando.UpdateInstaller).GetMethod(
             "BuildHelperScript", BindingFlags.Static | BindingFlags.NonPublic);
         File.WriteAllText(args[0], (string)method.Invoke(null, null));
+        FieldInfo bootstrap = typeof(MacRando.UpdateInstaller).GetField(
+            "HelperBootstrap", BindingFlags.Static | BindingFlags.NonPublic);
+        File.WriteAllText(args[1], (string)bootstrap.GetValue(null));
         return 0;
     }
 }
@@ -69,7 +72,8 @@ internal static class ExtractHelper
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the helper script extractor.' }
 
     $scriptPath = Join-Path $work 'helper.ps1'
-    & $extractExe $scriptPath
+    $bootstrapPath = Join-Path $work 'bootstrap.txt'
+    & $extractExe $scriptPath $bootstrapPath
     if ($LASTEXITCODE -ne 0) { throw 'Could not extract the helper script.' }
 
     # 3. The script must be valid PowerShell before it ever runs on a user's machine.
@@ -90,7 +94,8 @@ internal static class ExtractHelper
             [string]$NoMarker,
             [int]$DelayMs,
             [string]$ExpectedHash,
-            [switch]$TamperSource
+            [switch]$TamperSource,
+            [switch]$StaleLockedBackup
         )
         $caseDir = Join-Path $work $Label
         New-Item -ItemType Directory -Force -Path $caseDir | Out-Null
@@ -131,14 +136,31 @@ internal static class ExtractHelper
         $env:MACRANDO_STUB_NO_MARKER = $NoMarker
         $env:MACRANDO_STUB_DELAY_MS = "$DelayMs"
 
-        $helperCopy = Join-Path $caseDir 'helper.ps1'
-        Copy-Item $scriptPath $helperCopy -Force
+        # A backup left by an earlier update, held open read-only so this run cannot
+        # overwrite it. Step 2 then fails, and the helper must not roll back to it.
+        $staleHold = $null
+        if ($StaleLockedBackup) {
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+            [System.IO.File]::WriteAllBytes($backup, [byte[]](9, 9, 9))
+            $staleHold = [System.IO.File]::Open($backup, 'Open', 'Read', 'Read')
+        }
 
-        $process = Start-Process -FilePath 'powershell.exe' -PassThru -WindowStyle Hidden -ArgumentList @(
-            '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-            '-WindowStyle', 'Hidden', '-File', "`"$helperCopy`""
-        )
+        # Started exactly as the application starts it: the inline bootstrap, with the
+        # script delivered over standard input rather than from a file on disk.
+        $bootstrap = [System.IO.File]::ReadAllText($bootstrapPath)
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = 'powershell.exe'
+        $startInfo.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand ' +
+            [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($bootstrap))
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardInput = $true
+        $process = [System.Diagnostics.Process]::Start($startInfo)
+        $writer = New-Object System.IO.StreamWriter($process.StandardInput.BaseStream, (New-Object System.Text.UTF8Encoding($false)))
+        $writer.Write([System.IO.File]::ReadAllText($scriptPath))
+        $writer.Close()
         $process.WaitForExit(90000) | Out-Null
+        if ($null -ne $staleHold) { $staleHold.Dispose() }
 
         # Stop any stub a case deliberately left running.
         Get-Process -Name 'UpdaterHelperStub' -ErrorAction SilentlyContinue |
@@ -155,7 +177,7 @@ internal static class ExtractHelper
             NewBuild   = $isNewBuild
             OldBytes   = $isOldBytes
             Backup     = (Test-Path $backup)
-            SelfRemoved = (-not (Test-Path $helperCopy))
+            NoStaged   = (@(Get-ChildItem -LiteralPath $caseDir -Filter 'Target.exe.update-*').Count -eq 0)
         }
     }
 
@@ -176,6 +198,12 @@ internal static class ExtractHelper
     $noHashBytes = [System.IO.File]::ReadAllBytes((Join-Path $work 'nohash\Target.exe'))
     $noHashUntouched = ($noHashBytes.Length -eq 5 -and $noHashBytes[0] -eq 1)
 
+    # A failure before this run made its backup must not roll back to a backup left by an
+    # earlier update, which would silently install an older build.
+    $stale = Invoke-Case -Label 'stale' -WatchdogMs 20000 -Healthy '1' -NoMarker '0' -DelayMs 50 -StaleLockedBackup
+    $staleBytes = [System.IO.File]::ReadAllBytes((Join-Path $work 'stale\Target.exe'))
+    $staleUntouched = ($staleBytes.Length -eq 5 -and $staleBytes[0] -eq 1)
+
     Write-Host ''
     Write-Host '=== assertions ==='
 
@@ -192,11 +220,11 @@ internal static class ExtractHelper
     if (-not $crash.Backup -or -not $good.Backup) { Write-Host 'FAIL: the previous build was not backed up'; $failures++ }
     else { Write-Host 'PASS: the previous build is backed up before a swap' }
 
-    if (-not $good.SelfRemoved -or -not $crash.SelfRemoved -or -not $slow.SelfRemoved) {
-        Write-Host 'FAIL: the helper did not delete itself'
+    if (-not $good.NoStaged -or -not $crash.NoStaged -or -not $slow.NoStaged -or -not $tampered.NoStaged) {
+        Write-Host 'FAIL: the helper left a staged copy behind'
         $failures++
     }
-    else { Write-Host 'PASS: the helper cleans itself up' }
+    else { Write-Host 'PASS: the helper cleans up its staged copy' }
 
     # The security case: a download replaced after verification must never be installed.
     if (-not $tamperedUntouched) {
@@ -226,6 +254,12 @@ internal static class ExtractHelper
         $failures++
     }
     else { Write-Host 'PASS: an install with no expected hash is refused' }
+
+    if (-not $staleUntouched) {
+        Write-Host 'FAIL: a failure before the backup rolled back to a stale backup from an earlier update'
+        $failures++
+    }
+    else { Write-Host 'PASS: a stale backup from an earlier update is never rolled back to' }
 }
 finally {
     Get-Process -Name 'UpdaterHelperStub' -ErrorAction SilentlyContinue |

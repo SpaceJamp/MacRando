@@ -83,6 +83,62 @@ namespace MacRando
             return record;
         }
 
+        /// <summary>
+        /// Records the keep and updates the saved profiles to match. Returns the profile
+        /// that still has to be restored, which is the IP half of a combined change, or
+        /// null when nothing is left.
+        ///
+        /// A combined change is not discarded. Its profile stays, reduced to the IP half,
+        /// so the address is still restored on exit if the restore that follows the keep
+        /// fails. Discarding it left the random static address in place with no profile
+        /// to put the original back.
+        /// </summary>
+        public static AdapterBackup ApplyKeep(
+            AppState state,
+            AdapterBackup backup,
+            string keptMac,
+            DateTime nowUtc,
+            out KeptMacRecord record)
+        {
+            record = null;
+            if (state == null || backup == null)
+            {
+                return null;
+            }
+            record = Record(state, backup, keptMac, nowUtc);
+            if (state.Backups == null)
+            {
+                state.Backups = new Dictionary<string, AdapterBackup>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            string storedKey = null;
+            foreach (KeyValuePair<string, AdapterBackup> item in state.Backups)
+            {
+                if (object.ReferenceEquals(item.Value, backup) ||
+                    string.Equals(item.Key, backup.AdapterKey, StringComparison.OrdinalIgnoreCase) ||
+                    (item.Value != null && string.Equals(item.Value.AdapterKey, backup.AdapterKey, StringComparison.OrdinalIgnoreCase)))
+                {
+                    storedKey = item.Key;
+                    break;
+                }
+            }
+
+            if (!backup.IpChanged)
+            {
+                if (storedKey != null)
+                {
+                    state.Backups.Remove(storedKey);
+                }
+                return null;
+            }
+
+            AdapterBackup remaining = storedKey != null ? state.Backups[storedKey] : backup;
+            // The MAC half is now kept, so a restore of this profile must not touch it.
+            remaining.MacChanged = false;
+            state.Backups[storedKey ?? backup.AdapterKey] = remaining;
+            return remaining;
+        }
+
         public static KeptMacRecord Find(AppState state, string adapterKey)
         {
             if (state == null || state.KeptMacs == null || string.IsNullOrWhiteSpace(adapterKey))

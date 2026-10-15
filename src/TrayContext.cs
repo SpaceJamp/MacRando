@@ -801,8 +801,8 @@ namespace MacRando
             try
             {
                 AppState stateFile = _stateStore.Load();
-                KeptMacRecord record = KeepChangePolicy.Record(stateFile, backup, keptAddress, DateTime.UtcNow);
-                RemoveBackup(stateFile, backup);
+                KeptMacRecord record;
+                AdapterBackup ipRemaining = KeepChangePolicy.ApplyKeep(stateFile, backup, keptAddress, DateTime.UtcNow, out record);
                 if (stateFile.PendingOperation != null &&
                     string.Equals(stateFile.PendingOperation.AdapterKey, backup.AdapterKey, StringComparison.OrdinalIgnoreCase))
                 {
@@ -811,7 +811,12 @@ namespace MacRando
                 stateFile.KeptMacs = stateFile.KeptMacs ?? new List<KeptMacRecord>();
                 _stateStore.Save(stateFile);
                 _state = stateFile;
-                _changedAdapterKeysThisSession.Remove(backup.AdapterKey);
+                if (ipRemaining == null)
+                {
+                    // An IP half still pending stays in the session set, so exit restores it
+                    // if the restore below does not complete.
+                    _changedAdapterKeysThisSession.Remove(backup.AdapterKey);
+                }
                 _startupRandomizeBlocked = false;
                 UpdatePendingRestoreBanner();
                 UpdateFormBackupState();
@@ -835,9 +840,16 @@ namespace MacRando
                     backup.DisplayName + " will keep " + keptAddress + " until you restore it yourself.",
                     ToolTipIcon.Info);
 
-                if (alsoChangedIp)
+                if (ipRemaining != null)
                 {
-                    await RestoreAsync(backup, false);
+                    // allowWhileBusy, because this method holds the busy flag: without it
+                    // RestoreAsync returned at once and the IP half was never restored.
+                    bool ipRestored = await RestoreAsync(ipRemaining, false, true, true);
+                    if (!ipRestored)
+                    {
+                        _form.SetStatus("The MAC address was kept, but the local IP address was not restored. " +
+                            "Its restore profile was kept and will be retried on exit.");
+                    }
                 }
                 else
                 {
@@ -1812,6 +1824,7 @@ namespace MacRando
             NotificationPopup progressPopup = BeginProgressNotification(adapter, action);
             Exception operationError = null;
             bool changeVerified = false;
+            bool changeStarted = false;
             bool refreshFailed = false;
             NetworkState savedState = null;
             string proposedIpForHistory = null;
@@ -1948,6 +1961,9 @@ namespace MacRando
                     RecordIpChange(adapter, savedState, proposedIpForHistory, IpChangeOutcomes.Applied, automated, "Saved a restore profile before applying.");
                 }
                 _stateStore.Save(stateFile);
+                // From here the saved profile describes this change, so a failure has to
+                // be rolled back. Before it, nothing was touched.
+                changeStarted = true;
                 _state = stateFile;
                 _changedAdapterKeysThisSession.Add(adapter.Key);
                 UpdateFormBackupState();
@@ -2031,7 +2047,7 @@ namespace MacRando
                     RecordOperation(adapter, action, automated, false, operationError.Message);
                     AdapterBackup failedBackup = FindBackup(adapter.Key);
                     bool rolledBack = false;
-                    if (failedBackup != null)
+                    if (ShouldRollBackFailedChange(changeStarted, failedBackup))
                     {
                         try
                         {
@@ -2097,6 +2113,17 @@ namespace MacRando
             {
                 SetBusy(false);
             }
+        }
+
+        /// <summary>
+        /// Whether a failed change should be rolled back automatically. Only once the change
+        /// has started: a change refused before anything was applied left the adapter as it
+        /// was, and restoring then would silently undo an earlier, verified change that
+        /// happens to share the adapter's profile.
+        /// </summary>
+        internal static bool ShouldRollBackFailedChange(bool changeStarted, AdapterBackup backup)
+        {
+            return changeStarted && backup != null;
         }
 
         private async Task<bool> RestoreAsync(AdapterBackup backup, bool askConfirmation = true, bool showDashboard = true, bool allowWhileBusy = false)
