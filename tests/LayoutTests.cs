@@ -42,6 +42,7 @@ internal static class LayoutTests
             TheListPaneIsNotClippedAtHighDpi();
             NothingOverlapsUnderHighDpiScaling();
             WindowsScaleAfterTheirLayoutIsBuilt();
+            PopupSizesFollowTheDisplayScale();
             TheTrayMenuIsSensiblyOrdered();
             SectionHeadersAreNotClickable();
             ConstructingATrayContextDoesNotTouchRealData();
@@ -913,7 +914,8 @@ internal static class LayoutTests
         foreach (string[] window in new[]
         {
             new[] { "DashboardForm.cs", "public DashboardForm()", "BuildRootLayout();" },
-            new[] { "NotificationCenterForm.cs", "public NotificationCenterForm(", "BuildLayout();" }
+            new[] { "NotificationCenterForm.cs", "public NotificationCenterForm(", "BuildLayout();" },
+            new[] { "NotificationPopup.cs", "public NotificationPopup(Icon icon, string title, string message, bool darkMode, string severity", "BuildContent(" }
         })
         {
             string source = File.ReadAllText(Path.Combine(Path.Combine(root, "src"), window[0]));
@@ -942,6 +944,105 @@ internal static class LayoutTests
             {
                 Check(suspended == null || Convert.ToInt32(suspended.GetValue(center)) == 0,
                     "the notification center constructor must leave layout running");
+            }
+            using (var popup = new NotificationPopup(null, "Title", "Message", false, NotificationKinds.Info, 5000, false))
+            {
+                Check(suspended == null || Convert.ToInt32(suspended.GetValue(popup)) == 0,
+                    "the popup constructor must leave layout running");
+            }
+        });
+    }
+
+    /// <summary>
+    /// The popup re-sizes itself every time its buttons change, long after Windows has
+    /// scaled it, so those sizes have to carry the display scale themselves.
+    ///
+    /// It used to set fixed 100% heights there, which at 150% left the title row shorter
+    /// than its text and cut the bottom off the buttons. The test process runs at 96 DPI,
+    /// so the arithmetic is checked directly at each scale Windows offers, and a real
+    /// popup is checked at the scale it can have here.
+    /// </summary>
+    private static void PopupSizesFollowTheDisplayScale()
+    {
+        string root = Environment.GetEnvironmentVariable("MACRANDO_REPO_ROOT") ?? ".";
+        string source = File.ReadAllText(Path.Combine(Path.Combine(root, "src"), "NotificationPopup.cs"));
+        int constructor = source.IndexOf("public NotificationPopup(Icon icon, string title, string message, bool darkMode, string severity", StringComparison.Ordinal);
+        int resume = source.IndexOf("ResumeLayout(false);", constructor, StringComparison.Ordinal);
+        int sizing = source.IndexOf("SetActions(", constructor, StringComparison.Ordinal);
+        Check(resume >= 0 && sizing > resume,
+            "NotificationPopup: SetActions must run after layout resumes, or Windows scales the " +
+            "size it sets a second time");
+
+        foreach (float scale in new[] { 1F, 1.25F, 1.5F, 2F })
+        {
+            // A row of buttons measured at this scale, and a wrapped second row.
+            foreach (int actions in new[] { (int)Math.Round(34 * scale), (int)Math.Round(68 * scale) })
+            {
+                NotificationPopup.PopupMetrics metrics = NotificationPopup.Measure(scale, actions);
+                string where = "popup at " + (scale * 100) + "% with a " + actions + "px button row: ";
+                Check(metrics.ClientSize.Width == (int)Math.Round(430 * scale),
+                    where + "width " + metrics.ClientSize.Width + " does not follow the display scale");
+                Check(metrics.ActionsRowHeight == actions,
+                    where + "the button row is measured, so it must not be scaled again (got " +
+                    metrics.ActionsRowHeight + ")");
+                int body = metrics.ClientSize.Height - metrics.ActionsRowHeight;
+                Check(body >= (int)Math.Round(118 * scale),
+                    where + "the message area (" + body + "px) did not grow with the display");
+                // Two pixels of slack: the 1px border rounds up to 2px at 150%.
+                Check(body <= (int)Math.Round(120 * scale) + 2,
+                    where + "the message area (" + body + "px) was scaled more than once");
+            }
+        }
+
+        RunOnUiThread(delegate
+        {
+            foreach (bool diagnostics in new[] { false, true })
+            {
+                using (var popup = new NotificationPopup(null, "MAC address change failed",
+                    "Windows refused the new address for Ethernet. The adapter was left on its previous address.",
+                    false, NotificationKinds.Error, 60000, true))
+                {
+                    if (diagnostics)
+                    {
+                        Func<System.Threading.Tasks.Task> noop = () => null;
+                        popup.Configure("id", "{guid}", true, true, noop, noop, true, 60000);
+                    }
+                    Size first = popup.ClientSize;
+                    if (diagnostics)
+                    {
+                        Func<System.Threading.Tasks.Task> noop = () => null;
+                        popup.Configure("id", "{guid}", true, true, noop, noop, true, 60000);
+                        Check(popup.ClientSize == first,
+                            "configuring a popup twice changed its size from " + first + " to " + popup.ClientSize);
+                    }
+                    Check(first.Width == 430, "the popup is " + first.Width + "px wide at 100%");
+                    popup.Location = new Point(-5000, -5000);
+                    popup.Show();
+                    Application.DoEvents();
+                    Check(popup.ClientSize == first,
+                        "showing a popup changed its size from " + first + " to " + popup.ClientSize);
+                    int checkedButtons = 0;
+
+                    var panel = (FlowLayoutPanel)typeof(NotificationPopup)
+                        .GetField("_actionsPanel", BindingFlags.Instance | BindingFlags.NonPublic)
+                        .GetValue(popup);
+                    foreach (Control button in panel.Controls)
+                    {
+                        Check(((Button)button).AutoSizeMode == AutoSizeMode.GrowAndShrink,
+                            "'" + button.Text + "' only grows, so scaling leaves it taller than its text");
+                        if (!button.Visible)
+                        {
+                            continue;
+                        }
+                        checkedButtons++;
+                        Check(button.Bottom <= panel.ClientSize.Height,
+                            "'" + button.Text + "' ends at " + button.Bottom + "px in a " +
+                            panel.ClientSize.Height + "px button row");
+                    }
+                    Check(checkedButtons == (diagnostics ? 5 : 2),
+                        "expected " + (diagnostics ? 5 : 2) + " visible buttons, found " + checkedButtons);
+                    popup.Close();
+                }
             }
         });
     }
