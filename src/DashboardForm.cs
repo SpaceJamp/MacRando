@@ -308,6 +308,12 @@ namespace MacRando
 
         public DashboardForm()
         {
+            // Suspended for the whole constructor, so display scaling runs once, at the end,
+            // over the finished layout. Without it the form scaled itself as soon as
+            // AutoScaleMode was set, before any child existed, so at 150% the fonts grew but
+            // every fixed row height, padding and size added afterwards stayed at 100%, and
+            // text was squeezed into rows too short for it.
+            SuspendLayout();
             Text = AppInfo.ProductName + " " + AppInfo.Version;
             Icon = LoadApplicationIcon();
             ClientSize = new Size(1120, 720);
@@ -480,6 +486,8 @@ namespace MacRando
             ApplyTabOrder();
             ApplyTheme(darkMode);
             UpdateActionStates();
+            ResumeLayout(false);
+            PerformLayout();
         }
 
         public bool SelectAdapterByKey(string adapterKey)
@@ -972,6 +980,10 @@ namespace MacRando
             bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             _pendingBannerLabel = MakeMutedLabel(string.Empty);
+            // Sized from its text. A fixed-size label in this auto-sized row made the row
+            // as tall as the label happened to be, and display scaling then enlarged that
+            // arbitrary height instead of the text.
+            _pendingBannerLabel.AutoSize = true;
             _pendingBannerLabel.Dock = DockStyle.Fill;
             _pendingBannerLabel.TextAlign = ContentAlignment.MiddleLeft;
             _pendingBannerLabel.Margin = new Padding(0, 0, 12, 0);
@@ -1382,7 +1394,9 @@ namespace MacRando
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            // Sized to the filter row's contents. A fixed height clipped the bottom of the
+            // Star selected button, which sizes itself to its text, at 150% scaling.
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -1407,7 +1421,7 @@ namespace MacRando
             };
             layout.Controls.Add(_adapterSearchBox, 0, 1);
 
-            var filterRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = new Padding(0, 0, 0, 4) };
+            var filterRow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 0, 0, 4) };
             _connectedOnlyCheckBox = new CheckBox { Text = "Connected only", AutoSize = true, Margin = new Padding(0, 4, 12, 0) };
             _connectedOnlyCheckBox.CheckedChanged += (sender, args) =>
             {

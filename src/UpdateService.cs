@@ -301,11 +301,55 @@ namespace MacRando
             return client;
         }
 
+        /// <summary>
+        /// Whether a Get-AuthenticodeSignature status shows the file is intact.
+        ///
+        /// The thumbprint alone is not enough: a signed build modified after signing still
+        /// carries the signer's certificate, and reports HashMismatch. Valid is accepted, and
+        /// so are the two chain-trust failures, because the publisher certificate is
+        /// self-signed and goes into TrustedPublisher rather than Root, so its chain never
+        /// reaches a trusted root. Trust in the signer comes from the pinned thumbprint
+        /// instead. Anything else, HashMismatch and NotSigned above all, is refused.
+        /// </summary>
+        internal static bool IsAcceptableSignatureStatus(string status)
+        {
+            switch ((status ?? string.Empty).Trim())
+            {
+                case "Valid":
+                case "UnknownError":
+                case "NotTrusted":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Parses the helper output, "Status|Thumbprint", into a thumbprint, or an empty
+        /// string when the signature is missing, damaged, or the output is malformed.
+        /// </summary>
+        internal static string ParseSignatureOutput(string output)
+        {
+            string text = (output ?? string.Empty).Trim();
+            int separator = text.IndexOf('|');
+            if (separator <= 0)
+            {
+                return string.Empty;
+            }
+            string status = text.Substring(0, separator);
+            string thumbprint = text.Substring(separator + 1).Trim();
+            if (!IsAcceptableSignatureStatus(status) || !ThumbprintPattern.IsMatch(thumbprint))
+            {
+                return string.Empty;
+            }
+            return thumbprint.ToUpperInvariant();
+        }
+
         private static string GetAuthenticodeThumbprint(string path)
         {
             string script =
                 "$signature = Get-AuthenticodeSignature -LiteralPath '" + path.Replace("'", "''") + "'; " +
-                "if ($signature.SignerCertificate) { [Console]::Write($signature.SignerCertificate.Thumbprint) }";
+                "if ($signature.SignerCertificate) { [Console]::Write([string]$signature.Status + '|' + $signature.SignerCertificate.Thumbprint) }";
             string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
             var startInfo = new ProcessStartInfo
             {
@@ -324,7 +368,7 @@ namespace MacRando
                 }
                 string output = process.StandardOutput.ReadToEnd().Trim();
                 process.WaitForExit(15000);
-                return ThumbprintPattern.IsMatch(output ?? string.Empty) ? output.ToUpperInvariant() : string.Empty;
+                return ParseSignatureOutput(output);
             }
         }
 

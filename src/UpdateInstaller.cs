@@ -226,31 +226,13 @@ namespace MacRando
                 throw new InvalidOperationException("There is no verified update waiting to be installed.");
             }
 
-            string scriptPath = Path.Combine(
-                Path.GetDirectoryName(result.LocalDownloadPath) ?? Path.GetTempPath(),
-                "MacRando-install-" + Guid.NewGuid().ToString("N") + ".ps1");
             string markerPath = GetStartupMarkerPath(version);
             string backupPath = Path.Combine(GetDataDirectory(), "MacRando.previous.exe");
             string logPath = Path.Combine(GetDataDirectory(), "update-install.log");
 
-            string script = BuildHelperScript();
-
-            using (FileStream stream = new FileStream(scriptPath, FileMode.Create, FileAccess.Write, FileShare.None))
-            using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
-            {
-                writer.Write(script);
-            }
-
             // The helper reads these from the environment, so no path is ever quoted into a
             // command line and the swap target cannot be tampered with in transit.
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + scriptPath + "\"",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden
-            };
+            ProcessStartInfo startInfo = BuildHelperStartInfo();
             startInfo.EnvironmentVariables["MACRANDO_TARGET"] = target;
             startInfo.EnvironmentVariables["MACRANDO_SOURCE"] = result.LocalDownloadPath;
             startInfo.EnvironmentVariables["MACRANDO_BACKUP"] = backupPath;
@@ -275,6 +257,10 @@ namespace MacRando
             {
                 throw new InvalidOperationException("The update helper could not be started.");
             }
+            using (var writer = new StreamWriter(process.StandardInput.BaseStream, new UTF8Encoding(false)))
+            {
+                writer.Write(BuildHelperScript());
+            }
 
             AppLogger.Info("Update helper started (pid " + process.Id + ") for version " + version + ".");
             AppLogger.Info("  target : " + AppLogger.Sanitize(target));
@@ -289,6 +275,32 @@ namespace MacRando
         /// so the path does not have to round-trip through settings.
         /// </summary>
         public static UpdateCheckResult PendingInstall { get; set; }
+
+        /// <summary>
+        /// Reads the helper script from standard input and runs it.
+        ///
+        /// The helper runs elevated, so its script must never sit in a file the user can
+        /// write. It used to be written to the per-user temp folder and started with -File,
+        /// which let any unelevated process running as the same user rewrite it between the
+        /// write and the launch and so run its own code elevated. Standard input is a pipe
+        /// only this process holds.
+        /// </summary>
+        internal const string HelperBootstrap =
+            "$macRandoHelper = [Console]::In.ReadToEnd(); & ([ScriptBlock]::Create($macRandoHelper))";
+
+        internal static ProcessStartInfo BuildHelperStartInfo()
+        {
+            string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(HelperBootstrap));
+            return new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand " + encoded,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardInput = true
+            };
+        }
 
         private static string BuildHelperScript()
         {
@@ -305,7 +317,13 @@ $pidToWait  = [int]$env:MACRANDO_PID
 $watchdogMs = [int]$env:MACRANDO_WATCHDOG_MS
 $exitWaitMs = [int]$env:MACRANDO_EXIT_WAIT_MS
 $log        = $env:MACRANDO_LOG
-$self       = $MyInvocation.MyCommand.Path
+# The verified copy is staged next to the target, which for an installed copy is under
+# Program Files and so not writable by an unelevated process. The hash is checked on the
+# staged copy and that same copy is installed, so nothing can swap the file in between.
+$staged     = $target + '.update-' + [Guid]::NewGuid().ToString('N')
+# Set only once this run has made the backup. A backup left over from an earlier update
+# must never be used to roll back this one, or a failure before step 2 would install it.
+$backupMade = $false
 
 function Write-Log([string]$message) {
     try { Add-Content -LiteralPath $log -Value ((Get-Date).ToString('u') + ' ' + $message) } catch { }
@@ -367,8 +385,8 @@ function Get-FileVersionString([string]$path) {
     } catch { return '' }
 }
 
-function Remove-Self {
-    try { Remove-Item -LiteralPath $self -Force -ErrorAction SilentlyContinue } catch { }
+function Remove-Staged {
+    try { Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue } catch { }
 }
 
 try {
@@ -380,7 +398,7 @@ try {
     while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {
         if ((Get-Date) -gt $deadline) {
             Write-Log 'timed out waiting for MacRando to exit; nothing was changed'
-            Remove-Self
+            Remove-Staged
             exit 0
         }
         Start-Sleep -Milliseconds 200
@@ -391,43 +409,47 @@ try {
     $backupDir = Split-Path -Parent $backup
     if (-not (Test-Path -LiteralPath $backupDir)) { New-Item -ItemType Directory -Force -Path $backupDir | Out-Null }
     Copy-Item -LiteralPath $target -Destination $backup -Force
+    $backupMade = $true
     Write-Log ('backed up the current build to ' + $backup)
 
     # 3. Re-verify, then swap in the download.
     #
     # The download lives in a per-user temp folder and is checked in the main process, but
     # this script runs later, from an elevated helper. Anything running as the same user can
-    # replace the file in between. The hash is recomputed here, as close to the copy as
-    # possible, and the copy is refused if it does not match. Installing a file nobody was
-    # able to check is the one outcome worth being strict about, so an unreadable file is
-    # also treated as a failure rather than waved through.
+    # replace the file in between. So the download is first copied to the staging path, the
+    # hash is computed on that copy, and that copy is what gets installed. Hashing the temp
+    # file and then copying it would leave a gap in which it could be swapped. Installing a
+    # file nobody was able to check is the one outcome worth being strict about, so an
+    # unreadable file is also treated as a failure rather than waved through.
     $expectedHash = $env:MACRANDO_SHA256
     if ([string]::IsNullOrWhiteSpace($expectedHash)) {
         Write-Log 'refusing to install: no expected hash was supplied'
-        Remove-Self
+        Remove-Staged
         exit 2
     }
     if (-not (Test-Path -LiteralPath $source)) {
         Write-Log 'refusing to install: the download is no longer on disk'
-        Remove-Self
+        Remove-Staged
         exit 2
     }
     $actualHash = $null
     try {
-        $actualHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        Copy-Item -LiteralPath $source -Destination $staged -Force
+        $actualHash = (Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash
     } catch {
         Write-Log ('refusing to install: the download could not be read (' + $_.Exception.Message + ')')
-        Remove-Self
+        Remove-Staged
         exit 2
     }
     if ($actualHash -ne $expectedHash.Trim().ToUpperInvariant()) {
         Write-Log 'refusing to install: the download no longer matches the verified hash'
-        Remove-Self
+        Remove-Staged
         exit 2
     }
     Write-Log 're-verified the download immediately before installing'
 
-    Copy-Item -LiteralPath $source -Destination $target -Force
+    Copy-Item -LiteralPath $staged -Destination $target -Force
+    Remove-Staged
     Write-Log 'installed the new build'
 
     # 3b. Tell Windows what version is now installed.
@@ -488,8 +510,9 @@ try {
 }
 catch {
     Write-Log ('helper failed: ' + $_.Exception.Message)
-    # A failure part way through could leave a partial file, so restore if we made a backup.
-    if (Test-Path -LiteralPath $backup) {
+    # A failure part way through could leave a partial file, so restore if this run made a
+    # backup. Not merely if one exists: an older one may be there from a previous update.
+    if ($backupMade -and (Test-Path -LiteralPath $backup)) {
         try {
             $lingering = Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($target)) -ErrorAction SilentlyContinue
             if ($lingering) { $lingering | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 400 }
@@ -501,7 +524,7 @@ catch {
     }
 }
 finally {
-    Remove-Self
+    Remove-Staged
 }
 ";
         }

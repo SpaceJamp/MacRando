@@ -1,5 +1,41 @@
 # MacRando Changelog
 
+## 1.16.9 - 2026.10
+
+### Fixed
+
+- **Text overlapped and was cut off at 125% and 150% display scaling.** The dashboard turned on display scaling at the top of its constructor, so Windows scaled the window before any of its controls existed. The fonts still grew, because they are sized in points, but every fixed row height, padding and size added afterwards stayed at its 100% value. Text was squeezed into rows too short for it, most visibly below the adapter list and in Safety and status. The "Show public IP location" check box lost its bottom edge, the search box sat on top of "Connected only", "Manual MAC" ran into its text box, and "Dark mode" was truncated. Layout is now suspended for the whole constructor, so scaling runs once over the finished layout. The notification center had the same fault and the same fix.
+- **The pending-restore banner could grow far taller than its text.** Its message label had a fixed size, so its row took whatever height the label happened to have, and scaling enlarged that instead of the text. The label now sizes itself from its text.
+- **The "Star selected" button was clipped at 150%.** It sizes itself to its text, but sat in a fixed-height row. The row now sizes to its contents.
+
+### Tests
+
+- `WindowsScaleAfterTheirLayoutIsBuilt` checks that the dashboard and the notification center suspend layout before turning on display scaling and resume it only once the layout is built, and that both leave layout running. The existing high-DPI checks use `form.Scale`, which scales a finished layout and so could never see this, and a test process runs at 96 DPI, where no scaling happens at all. The test fails against 1.16.8.
+
+### Notes
+
+- Notification popups still size themselves in fixed pixels whenever their actions change, so they are not yet fully scaled at high display scaling. That needs its own change.
+
+## 1.16.8 - 2026.10
+
+### Security
+
+- **The update check accepted a damaged signature.** It compared the signer's thumbprint but never looked at the signature status. A signed build modified after signing still carries its signer's certificate and reports `HashMismatch`, so it passed. Only `Valid` and the two chain-trust statuses (`UnknownError`, `NotTrusted`) are accepted now. The chain-trust statuses are accepted because the publisher certificate is installed in TrustedPublisher rather than Root, so a genuine release never reaches a trusted root, and the signer is pinned by thumbprint instead.
+- **The elevated update helper could be rewritten before it ran.** Its script was written to the per-user temp folder and started with `-File`, so any unelevated program running as the same user could replace it first and have its own code run elevated. The script is now delivered over standard input to a one-line inline bootstrap and never touches disk.
+- **The download could be swapped between its final hash check and the install.** The helper hashed the file in the temp folder and then copied it from the same path. The download is now copied next to the target first, hashed there, and that copy is installed. For an installed copy that location is under Program Files, out of reach of an unelevated process.
+
+### Fixed
+
+- **"Keep change" never restored the IP half of a combined change.** Keeping a MAC change that also altered the local IP address is meant to keep the MAC and restore the IP. The restore was started while the keep still held the busy flag, so it returned at once, and the restore profile had already been deleted. The random static address stayed with no way back. The profile is now reduced to its IP half and kept until that half is restored, so exit retries it if the restore fails, and the kept MAC is left alone.
+- **A change refused before it started undid an earlier change.** Any failure triggered an automatic restore of the adapter's saved profile, even when nothing had been applied. Randomizing the MAC and then attempting an IP change that was refused up front reverted the MAC change and restarted the adapter. Rollback now happens only once a change has actually begun.
+- **A failed update could install an older build.** If the helper failed before it had made its own backup, its error handler restored whatever `MacRando.previous.exe` was left by an earlier update. It now rolls back only to a backup made during the same run.
+
+### Tests
+
+- `keep-change-tests` covers keeping a MAC-only change, keeping a combined change (an IP-only profile is left and cannot itself be kept), and the rule that a change which never started is not rolled back.
+- `update-trust-tests` covers each signature status, including `HashMismatch` with the expected thumbprint, and asserts the helper is started from the inline bootstrap with no script file.
+- The update helper end-to-end test now launches the helper exactly as the application does, checks that no staged copy is left behind, and adds a case with a locked backup from an earlier update. That case fails against the old logic.
+
 ## 1.16.7 - 2026.10
 
 ### Fixed

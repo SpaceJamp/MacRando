@@ -30,6 +30,9 @@ internal static class KeepChangeTests
             TheListIsCapped();
             NullEntriesAreDropped();
             DescribeIsUseful();
+            KeepingAMacOnlyChangeDiscardsTheProfile();
+            KeepingACombinedChangeLeavesTheIpHalfToRestore();
+            AChangeRefusedBeforeItStartsIsNotRolledBack();
             Console.WriteLine("keep-change-tests=OK;checks=" + _checks);
             return 0;
         }
@@ -208,5 +211,63 @@ internal static class KeepChangeTests
         Check(text.Contains("02-00-00-00-00-04"), "the description should name what was kept");
         Check(text.Contains("A4-1B-C0-11-22-33"), "the description should name the original");
         Check(KeepChangePolicy.Describe(null) == string.Empty, "a missing record describes as nothing");
+    }
+
+    private static MacRando.AppState StateWith(MacRando.AdapterBackup backup)
+    {
+        var state = new MacRando.AppState();
+        state.Backups = new Dictionary<string, MacRando.AdapterBackup>(StringComparer.OrdinalIgnoreCase);
+        state.Backups[backup.AdapterKey] = backup;
+        return state;
+    }
+
+    private static void KeepingAMacOnlyChangeDiscardsTheProfile()
+    {
+        MacRando.AdapterBackup backup = Backup(true, false, "A4-1B-C0-11-22-33", "02-00-00-00-00-04");
+        MacRando.AppState state = StateWith(backup);
+        KeptMacRecord record;
+        MacRando.AdapterBackup remaining = KeepChangePolicy.ApplyKeep(
+            state, backup, "02-00-00-00-00-04", DateTime.UtcNow, out record);
+        Check(remaining == null, "a MAC-only keep leaves nothing to restore");
+        Check(state.Backups.Count == 0, "a MAC-only keep removes the profile");
+        Check(record != null && record.OriginalMacAddress == "A4-1B-C0-11-22-33", "the keep is recorded");
+    }
+
+    private static void KeepingACombinedChangeLeavesTheIpHalfToRestore()
+    {
+        // The regression: the whole profile was discarded, then the IP restore never ran,
+        // leaving a random static address with no way back.
+        MacRando.AdapterBackup backup = Backup(true, true, "A4-1B-C0-11-22-33", "02-00-00-00-00-04");
+        backup.OriginalIpAddress = "192.168.1.20";
+        backup.ModifiedIpAddress = "192.168.1.123";
+        MacRando.AppState state = StateWith(backup);
+        // A copy, as the tray passes the in-memory profile while the state is freshly loaded.
+        MacRando.AdapterBackup inMemory = Backup(true, true, "A4-1B-C0-11-22-33", "02-00-00-00-00-04");
+        inMemory.IpChanged = true;
+        KeptMacRecord record;
+        MacRando.AdapterBackup remaining = KeepChangePolicy.ApplyKeep(
+            state, inMemory, "02-00-00-00-00-04", DateTime.UtcNow, out record);
+        Check(remaining != null, "a combined keep must leave the IP half to restore");
+        Check(state.Backups.Count == 1, "the profile must stay saved until the IP half is restored");
+        Check(object.ReferenceEquals(state.Backups[backup.AdapterKey], remaining),
+            "the remaining profile must be the one saved in the state");
+        Check(remaining.IpChanged, "the remaining profile must still restore the IP address");
+        Check(!remaining.MacChanged, "the remaining profile must not restore the kept MAC address");
+        Check(remaining.OriginalIpAddress == "192.168.1.20", "the original IP must survive the keep");
+        string reason;
+        Check(!KeepChangePolicy.CanKeep(remaining, out reason), "the IP half on its own must not be keepable");
+    }
+
+    private static void AChangeRefusedBeforeItStartsIsNotRolledBack()
+    {
+        // An earlier verified change shares the adapter's profile. A later change refused
+        // before anything was applied used to restore it, undoing the earlier change.
+        MacRando.AdapterBackup earlier = Backup(true, false, "A4-1B-C0-11-22-33", "02-00-00-00-00-04");
+        Check(!MacRando.TrayContext.ShouldRollBackFailedChange(false, earlier),
+            "a change that never started must not roll back an earlier change");
+        Check(MacRando.TrayContext.ShouldRollBackFailedChange(true, earlier),
+            "a change that started and failed must be rolled back");
+        Check(!MacRando.TrayContext.ShouldRollBackFailedChange(true, null),
+            "with no profile there is nothing to roll back");
     }
 }
