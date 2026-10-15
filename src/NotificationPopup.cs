@@ -27,9 +27,10 @@ namespace MacRando
     internal sealed class NotificationPopup : Form
     {
         private const int DefaultTimeoutMilliseconds = 5000;
+        private const float DesignDpi = 96F;
         private const int PopupWidth = 430;
         private const int PopupHeight = 116;
-        private const int PopupHeightWithActions = 158;
+        private const int PopupBodyHeight = 102;
         private const int PopupMargin = 12;
         private const int PopupGap = 8;
 
@@ -76,6 +77,11 @@ namespace MacRando
 
         public NotificationPopup(Icon icon, string title, string message, bool darkMode, string severity, int timeoutMilliseconds, bool persistent)
         {
+            // Everything below is written in 100% pixels. Suspending layout first means
+            // Windows scales the window and its controls together, once, when layout
+            // resumes; with layout running the window scaled itself before any of its
+            // controls existed and they stayed at 100% while their fonts grew.
+            SuspendLayout();
             Text = "MacRando notification";
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
@@ -83,7 +89,7 @@ namespace MacRando
             MinimizeBox = false;
             MaximizeBox = false;
             TopMost = true;
-            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleDimensions = new SizeF(DesignDpi, DesignDpi);
             AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(PopupWidth, PopupHeight);
             MinimumSize = new Size(360, 100);
@@ -119,8 +125,12 @@ namespace MacRando
             _closeTimer = new Timer();
             _closeTimer.Interval = _timeoutMilliseconds;
             _closeTimer.Tick += (sender, args) => Dismiss(false);
-            SetActions(false, false, null, null, persistent, timeoutMilliseconds);
             ApplyAccessibility();
+            ResumeLayout(false);
+            PerformLayout();
+
+            // After scaling, so the sizes SetActions works out are not scaled a second time.
+            SetActions(false, false, null, null, persistent, timeoutMilliseconds);
         }
 
         /// <summary>
@@ -499,7 +509,7 @@ namespace MacRando
             _actionsPanel.WrapContents = true;
             _actionsPanel.BackColor = BackColor;
             _actionsPanel.Margin = Padding.Empty;
-            _actionsPanel.Padding = new Padding(0, 4, 0, 0);
+            _actionsPanel.Padding = new Padding(0, 4, 0, 2);
             _actionsPanel.Controls.Add(_dismissButton);
             _actionsPanel.Controls.Add(_diagnosticsButton);
             _actionsPanel.Controls.Add(_retryButton);
@@ -521,6 +531,7 @@ namespace MacRando
             {
                 Text = text,
                 AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 MinimumSize = new Size(64, 28),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 8.5F, FontStyle.Regular, GraphicsUnit.Point),
@@ -544,17 +555,70 @@ namespace MacRando
             _diagnosticsButton.Visible = showRestore || showRetry;
             _openButton.Visible = true;
             _dismissButton.Visible = true;
-            _layout.RowStyles[1].SizeType = SizeType.Absolute;
-            bool hasDiagnosticActions = showRestore || showRetry;
-            _layout.RowStyles[1].Height = hasDiagnosticActions ? 68F : 38F;
-            ClientSize = new Size(PopupWidth, hasDiagnosticActions ? PopupHeightWithActions + 30 : PopupHeightWithActions);
-            PerformLayout();
+            ApplySize();
             _closeTimer.Stop();
             if (!persistent && IsHandleCreated && Visible)
             {
                 _closeTimer.Interval = _timeoutMilliseconds;
                 _closeTimer.Start();
             }
+        }
+
+        /// <summary>
+        /// Sizes the window for the buttons now showing.
+        ///
+        /// This runs after Windows has scaled the window, so nothing here may be a bare
+        /// 100% pixel value: the width and the message area are design sizes multiplied
+        /// by the display scale, and the button row is measured from the buttons, whose
+        /// fonts have already grown with the display.
+        /// </summary>
+        private void ApplySize()
+        {
+            float scale = CurrentAutoScaleDimensions.Height / DesignDpi;
+            ClientSize = new Size(ScaleBy(PopupWidth, scale), ClientSize.Height);
+            PerformLayout();
+            int actionsWidth = _layout.DisplayRectangle.Width;
+            int actionsHeight = _actionsPanel.GetPreferredSize(new Size(actionsWidth, 0)).Height;
+            PopupMetrics metrics = Measure(scale, actionsHeight);
+            _layout.RowStyles[1].SizeType = SizeType.Absolute;
+            _layout.RowStyles[1].Height = metrics.ActionsRowHeight;
+            ClientSize = metrics.ClientSize;
+            PerformLayout();
+        }
+
+        /// <summary>The window size and button row height at a given display scale.</summary>
+        internal struct PopupMetrics
+        {
+            public Size ClientSize;
+            public int ActionsRowHeight;
+        }
+
+        /// <summary>
+        /// Works out the popup's size from the display scale (1.5 at 150%) and the height
+        /// the button row needs, which is already in device pixels because it is measured.
+        /// Only the design sizes are multiplied by the scale.
+        /// </summary>
+        internal static PopupMetrics Measure(float scale, int actionsHeight)
+        {
+            if (scale <= 0F)
+            {
+                scale = 1F;
+            }
+            // Form padding (1 + 1) and the layout's top and bottom padding (10 + 6).
+            int chrome = ScaleBy(1, scale) * 2 + ScaleBy(10, scale) + ScaleBy(6, scale);
+            int actions = Math.Max(0, actionsHeight);
+            return new PopupMetrics
+            {
+                ClientSize = new Size(
+                    ScaleBy(PopupWidth, scale),
+                    chrome + ScaleBy(PopupBodyHeight, scale) + actions),
+                ActionsRowHeight = actions
+            };
+        }
+
+        private static int ScaleBy(int value, float scale)
+        {
+            return (int)Math.Round(value * scale);
         }
 
         private void BodyClick(object sender, EventArgs args)
