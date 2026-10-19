@@ -34,6 +34,9 @@ internal static class UpdateTrustTests
             PreferencesAreStillInClearText();
             RedirectsAreResolvedButNeverDowngraded();
             TheLiveManifestIsReachableThroughARedirect();
+            EveryPreferenceSurvivesASave();
+            AFailedTrustWriteKeepsTheUpdateSource();
+            ACorruptSettingsFileKeepsTheUpdateSource();
             ADamagedSignatureIsRefusedDespiteTheThumbprint();
             TheHelperScriptIsNeverReadFromDisk();
             Console.WriteLine("update-trust-tests=OK;checks=" + _checks);
@@ -398,6 +401,130 @@ internal static class UpdateTrustTests
                 Check(result.StatusMessage.Contains(published.ToString()),
                     "an available update should name the version, but the message was: " + result.StatusMessage);
             }
+        }
+    }
+
+    /// <summary>
+    /// Every preference must come back from a save. Save copied the fields one by one and
+    /// left out ShowPublicIpLocation, so that opt-in was written as false every time and
+    /// never survived a restart. Every public property is set to a non-default value by
+    /// reflection, so a preference added later is covered without editing this test.
+    /// </summary>
+    private static void EveryPreferenceSurvivesASave()
+    {
+        string dir = Sandbox();
+        try
+        {
+            var store = new MacRando.AppSettingsStore(Path.Combine(dir, "settings.json"));
+            var settings = new AppSettings();
+            foreach (System.Reflection.PropertyInfo property in typeof(AppSettings).GetProperties())
+            {
+                if (!property.CanWrite)
+                {
+                    continue;
+                }
+                if (property.PropertyType == typeof(bool))
+                {
+                    property.SetValue(settings, !(bool)property.GetValue(settings, null), null);
+                }
+                else if (property.PropertyType == typeof(int))
+                {
+                    // In range for every clamped setting.
+                    property.SetValue(settings, 9, null);
+                }
+            }
+            settings.AutoRandomizeAdapterKey = "{121EC763-A5F6-4EF7-AD11-554AD8464295}";
+            settings.UpdateManifestUrl = SampleUrl;
+            settings.ExpectedSignerThumbprint = SampleThumbprint;
+            settings.FavoriteAdapters = new List<string> { "{A}", "{B}" };
+            store.Save(settings);
+
+            AppSettings loaded = store.Load();
+            foreach (System.Reflection.PropertyInfo property in typeof(AppSettings).GetProperties())
+            {
+                if (!property.CanWrite || property.PropertyType == typeof(List<string>))
+                {
+                    continue;
+                }
+                object expected = property.GetValue(settings, null);
+                object actual = property.GetValue(loaded, null);
+                Check(object.Equals(expected, actual),
+                    "the preference " + property.Name + " did not survive a save: saved " + expected + ", loaded " + actual);
+            }
+            Check(loaded.FavoriteAdapters.Count == 2, "favorites must survive a save");
+            Check(loaded.ShowPublicIpLocation, "the public IP location opt-in must survive a save");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// The update values used to be cleared from settings.json before the encrypted file
+    /// was written, so a failed encrypted write lost them, while the log said they were
+    /// still in settings.json. The write is made to fail by putting a directory where its
+    /// temporary file goes.
+    /// </summary>
+    private static void AFailedTrustWriteKeepsTheUpdateSource()
+    {
+        string dir = Sandbox();
+        try
+        {
+            string path = Path.Combine(dir, "settings.json");
+            var store = new MacRando.AppSettingsStore(path);
+            Directory.CreateDirectory(store.UpdateTrustPath + ".tmp");
+            var settings = new AppSettings { UpdateManifestUrl = SampleUrl, ExpectedSignerThumbprint = SampleThumbprint };
+            store.Save(settings);
+
+            Check(!File.Exists(store.UpdateTrustPath), "the encrypted write was meant to fail in this test");
+            AppSettings loaded = store.Load();
+            Check(loaded.UpdateManifestUrl == SampleUrl,
+                "a failed encrypted write must leave the update URL in settings.json, not lose it");
+            Check(loaded.ExpectedSignerThumbprint == SampleThumbprint,
+                "a failed encrypted write must leave the signer thumbprint in settings.json");
+
+            // Once the encrypted write can succeed, the clear text copy goes.
+            Directory.Delete(store.UpdateTrustPath + ".tmp");
+            store.Save(loaded);
+            Check(File.ReadAllText(path).IndexOf(SampleUrl, StringComparison.Ordinal) < 0,
+                "after a successful encrypted write the URL must leave settings.json");
+            Check(store.Load().UpdateManifestUrl == SampleUrl, "and still load from the encrypted file");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// A settings.json that cannot be parsed used to discard the already-read trust
+    /// values too, and the next preference change then wrote blanks over a trust file
+    /// that was perfectly readable.
+    /// </summary>
+    private static void ACorruptSettingsFileKeepsTheUpdateSource()
+    {
+        string dir = Sandbox();
+        try
+        {
+            string path = Path.Combine(dir, "settings.json");
+            var store = new MacRando.AppSettingsStore(path);
+            store.Save(new AppSettings { UpdateManifestUrl = SampleUrl, ExpectedSignerThumbprint = SampleThumbprint });
+            File.WriteAllText(path, "{ this is not json");
+
+            AppSettings loaded = store.Load();
+            Check(loaded.UpdateManifestUrl == SampleUrl,
+                "a corrupt settings.json must not hide a readable trust file");
+            loaded.ShowConnectedAdaptersOnly = true;
+            store.Save(loaded);
+            AppSettings reloaded = store.Load();
+            Check(reloaded.UpdateManifestUrl == SampleUrl && reloaded.ExpectedSignerThumbprint == SampleThumbprint,
+                "saving a preference after a corrupt settings.json must not erase the update source");
+            Check(reloaded.ShowConnectedAdaptersOnly, "and the new preference must be kept");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
         }
     }
 

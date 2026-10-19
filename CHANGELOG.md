@@ -1,5 +1,27 @@
 # MacRando Changelog
 
+## 1.16.11 - 2026.10
+
+### Fixed
+
+- **Shutting down, restarting or signing out no longer leaves changes in place.** The automatic restore only ran from the tray menu's Exit command, so the commonest way MacRando ends, the Windows session ending, restored nothing. A random static IP survived the reboot, which is the case that tends to break connectivity. MacRando now restores the adapters it changed in this session when the session begins to end, and Windows waits for it, showing "MacRando is restoring your network adapter settings". The wait is capped at 90 seconds so shutdown can never hang. Anything not restored keeps its profile and is offered again at the next start. A kept MAC change is not undone, just as at Exit.
+- **"Show public IP location" was forgotten on every restart.** Saving the settings copied each preference by hand and left this one out, so it was always written as off. Settings are now copied whole, so a preference added later cannot be missed the same way.
+- **Retry could undo an earlier change instead of retrying.** After a change was refused before anything was applied, the Retry button on the popup and in the notification center restored the adapter's saved profile, which belonged to an earlier, verified change, and never retried. Restore is now offered, and Retry restores first, only when the failed change itself had started.
+- **A failed write of the encrypted update settings lost the update source.** The manifest URL and signer thumbprint were cleared from `settings.json` before the encrypted file was written, so a failed write lost them while the log said they were still there. They are now cleared only once the encrypted file has been written.
+- **A damaged `settings.json` could erase the update source.** Preferences that could not be read fell back to defaults and discarded the readable encrypted values too, so the next preference change wrote blanks over them. The encrypted values are now kept when `settings.json` cannot be read.
+- **Turning off "Start with Windows" could report success while the logon task remained.** Any error removing the task was treated as "already removed". Only a task that is genuinely absent counts as success now; a removal that fails is reported.
+
+### Tests
+
+- `session-end-tests` (new) covers which profiles are restored at session end, that the wait keeps the message loop running and is bounded, that the dashboard survives the end-of-session message while a restore needs it, that the handlers are subscribed and released, and the Retry rule.
+- `EveryPreferenceSurvivesASave` sets every preference to a non-default value by reflection and checks each one survives a save, so a newly added preference is covered automatically. `AFailedTrustWriteKeepsTheUpdateSource` and `ACorruptSettingsFileKeepsTheUpdateSource` cover the two update-source cases.
+- `AFailedRemovalIsNotReportedAsSuccess` runs the real removal script against stand-in cmdlets, so Task Scheduler is never touched.
+- The settings, removal and session-end form tests each fail against the previous behaviour.
+
+### Notes
+
+- A session end cannot be produced in a test, so the restore at shutdown is covered in parts rather than end to end. It has not yet been confirmed on a real shutdown.
+
 ## 1.16.10 - 2026.10
 
 ### Fixed

@@ -954,6 +954,26 @@ namespace MacRando
             }
         }
 
+        private const int WM_ENDSESSION = 0x0016;
+
+        /// <summary>
+        /// Set while a restore runs because the Windows session is ending. That restore
+        /// reports through this form, and WinForms disposes a form when the session ends,
+        /// which made the restore fail before it reached the adapter. The process is ended
+        /// by Windows straight afterwards in any case, so nothing is left open.
+        /// </summary>
+        internal bool HoldOpenAtSessionEnd { get; set; }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_ENDSESSION && HoldOpenAtSessionEnd)
+            {
+                m.Result = IntPtr.Zero;
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (!_allowClose && e.CloseReason == CloseReason.UserClosing)

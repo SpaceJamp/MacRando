@@ -255,18 +255,23 @@ Write-Output 'registered'
 ";
 
         /// <summary>
-        /// Removes the task, ignoring the case where it is already gone.
+        /// Removes the task, treating only "already gone" as success.
+        ///
+        /// Every error used to be caught and reported as "absent", so a removal that was
+        /// refused reported success, the setting showed as off, and the task went on
+        /// starting MacRando at every logon. Absence is now checked first, and a failure to
+        /// remove a task that exists is left to fail the script.
         /// </summary>
-        private const string UnregisterScript = @"
+        internal const string UnregisterScript = @"
 $ErrorActionPreference = 'Stop'
-try {
-  Unregister-ScheduledTask -TaskName 'MacRando' -Confirm:$false -ErrorAction Stop | Out-Null
-  Write-Output 'removed'
-}
-catch {
+$existing = Get-ScheduledTask -TaskName 'MacRando' -ErrorAction SilentlyContinue
+if ($null -eq $existing) {
   # Already absent is the desired end state, not a failure.
   Write-Output 'absent'
+  return
 }
+Unregister-ScheduledTask -TaskName 'MacRando' -Confirm:$false -ErrorAction Stop | Out-Null
+Write-Output 'removed'
 ";
     }
 }

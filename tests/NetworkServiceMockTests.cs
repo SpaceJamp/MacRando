@@ -278,6 +278,11 @@ internal static class NetworkServiceMockTests
             {
                 return startupResult;
             }
+            int sessionEndResult = SessionEndTests.Run();
+            if (sessionEndResult != 0)
+            {
+                return sessionEndResult;
+            }
             int sweepResult = ControlSweepTests.Run();
             if (sweepResult != 0)
             {

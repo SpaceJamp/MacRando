@@ -128,36 +128,33 @@ namespace MacRando
         {
             lock (_sync)
             {
+                // The trust file is read first and independently, because a user who
+                // deletes the plain settings file to start clean has not asked to
+                // discard where updates come from, and losing that silently disables
+                // update checks with no visible cause.
+                UpdateTrustPayload trust = ReadUpdateTrust();
+                AppSettings settings;
                 try
                 {
-                    // The trust file is read first and independently, because a user who
-                    // deletes the plain settings file to start clean has not asked to
-                    // discard where updates come from, and losing that silently disables
-                    // update checks with no visible cause.
-                    UpdateTrustPayload trust = ReadUpdateTrust();
-                    if (!File.Exists(_settingsPath))
-                    {
-                        AppSettings fresh = new AppSettings();
-                        if (trust != null)
-                        {
-                            fresh.UpdateManifestUrl = trust.UpdateManifestUrl ?? string.Empty;
-                            fresh.ExpectedSignerThumbprint = trust.ExpectedSignerThumbprint ?? string.Empty;
-                        }
-                        return fresh;
-                    }
-                    AppSettings settings = new JavaScriptSerializer().Deserialize<AppSettings>(File.ReadAllText(_settingsPath, Encoding.UTF8));
-                    Normalize(settings);
-                    if (trust != null)
-                    {
-                        settings.UpdateManifestUrl = trust.UpdateManifestUrl ?? string.Empty;
-                        settings.ExpectedSignerThumbprint = trust.ExpectedSignerThumbprint ?? string.Empty;
-                    }
-                    return settings;
+                    settings = File.Exists(_settingsPath)
+                        ? Normalize(new JavaScriptSerializer().Deserialize<AppSettings>(File.ReadAllText(_settingsPath, Encoding.UTF8)))
+                        : new AppSettings();
                 }
-                catch
+                catch (Exception error)
                 {
-                    return new AppSettings();
+                    // Preferences that cannot be read fall back to defaults, but the trust
+                    // values are still applied below. Dropping them here used to mean the
+                    // next preference change wrote blank values over a trust file that was
+                    // perfectly readable, erasing where updates come from.
+                    AppLogger.Error("settings.json could not be read; using default preferences.", error);
+                    settings = new AppSettings();
                 }
+                if (trust != null)
+                {
+                    settings.UpdateManifestUrl = trust.UpdateManifestUrl ?? string.Empty;
+                    settings.ExpectedSignerThumbprint = trust.ExpectedSignerThumbprint ?? string.Empty;
+                }
+                return settings;
             }
         }
 
@@ -245,46 +242,41 @@ namespace MacRando
                 Directory.CreateDirectory(directory);
                 string temporaryPath = _settingsPath + ".tmp";
 
-                // The two trust values are removed before the preferences are written, so
-                // the clear text file never holds them again once this has run once.
+                // The trust file is written first, and the two values are cleared from the
+                // clear text file only once it has been. Clearing them unconditionally lost
+                // the update source whenever the encrypted write failed, while the log
+                // claimed the values were still in settings.json.
                 bool hadTrust = !string.IsNullOrWhiteSpace(settings.UpdateManifestUrl) ||
                     !string.IsNullOrWhiteSpace(settings.ExpectedSignerThumbprint);
-                AppSettings preferences = new AppSettings
+                bool trustProtected = true;
+                if (hadTrust || File.Exists(_updateTrustPath))
                 {
-                    StartMinimized = settings.StartMinimized,
-                    StartWithWindows = settings.StartWithWindows,
-                    AutoRandomizeMacOnStartup = settings.AutoRandomizeMacOnStartup,
-                    AutoRandomizeAdapterKey = settings.AutoRandomizeAdapterKey,
-                    NotificationsEnabled = settings.NotificationsEnabled,
-                    NotificationSoundEnabled = settings.NotificationSoundEnabled,
-                    NotificationCollapseDuplicates = settings.NotificationCollapseDuplicates,
-                    NotificationQuietHoursEnabled = settings.NotificationQuietHoursEnabled,
-                    NotificationQuietHoursStartHour = settings.NotificationQuietHoursStartHour,
-                    NotificationQuietHoursEndHour = settings.NotificationQuietHoursEndHour,
-                    NotificationDurationSeconds = settings.NotificationDurationSeconds,
-                    UpdateManifestUrl = string.Empty,
-                    ExpectedSignerThumbprint = string.Empty,
-                    FavoriteAdapters = settings.FavoriteAdapters,
-                    ShowConnectedAdaptersOnly = settings.ShowConnectedAdaptersOnly
-                };
+                    trustProtected = WriteUpdateTrust(settings);
+                }
+
+                // Copied through the serializer rather than field by field, so a preference
+                // added later cannot be left out. ShowPublicIpLocation was, and the opt-in
+                // was written as false on every save, so it never survived a restart.
+                var serializer = new JavaScriptSerializer();
+                AppSettings preferences = serializer.Deserialize<AppSettings>(serializer.Serialize(settings));
+                if (trustProtected)
+                {
+                    preferences.UpdateManifestUrl = string.Empty;
+                    preferences.ExpectedSignerThumbprint = string.Empty;
+                }
                 File.WriteAllText(
                     temporaryPath,
-                    new JavaScriptSerializer().Serialize(preferences),
+                    serializer.Serialize(preferences),
                     new UTF8Encoding(false));
                 if (File.Exists(_settingsPath))
                 {
                     File.Delete(_settingsPath);
                 }
                 File.Move(temporaryPath, _settingsPath);
-
-                if (hadTrust || File.Exists(_updateTrustPath))
-                {
-                    WriteUpdateTrust(settings);
-                }
             }
         }
 
-        private void WriteUpdateTrust(AppSettings settings)
+        private bool WriteUpdateTrust(AppSettings settings)
         {
             try
             {
@@ -300,6 +292,7 @@ namespace MacRando
                     File.Delete(_updateTrustPath);
                 }
                 File.Move(temporaryPath, _updateTrustPath);
+                return true;
             }
             catch (Exception error)
             {
@@ -307,6 +300,7 @@ namespace MacRando
                 // values stay in clear text until it can be. Update checks still work;
                 // they are simply not protected yet.
                 AppLogger.Error("Could not write the encrypted update trust file; the values remain in settings.json.", error);
+                return false;
             }
         }
     }

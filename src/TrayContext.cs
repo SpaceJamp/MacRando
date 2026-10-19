@@ -74,6 +74,9 @@ namespace MacRando
         private bool _networkBaselineSet;
         private string _lastNetworkKey = string.Empty;
         private int _networkAutoApplyInFlight;
+        private bool _sessionEventsSubscribed;
+        private Task _sessionEndRestore;
+        private IntPtr _sessionEndWindow;
 
         public TrayContext()
             : this(false, null)
@@ -194,6 +197,14 @@ namespace MacRando
             {
                 Application.Idle -= StartInitialRefresh;
                 StopNetworkChangeWatch();
+                if (_sessionEventsSubscribed)
+                {
+                    // SystemEvents holds its handlers statically, so leaving these would keep
+                    // this context alive and still answering after it is disposed.
+                    SystemEvents.SessionEnding -= OnSessionEnding;
+                    SystemEvents.SessionEnded -= OnSessionEnded;
+                    _sessionEventsSubscribed = false;
+                }
                 List<NotificationPopup> popups = new List<NotificationPopup>(_notificationPopups);
                 _notificationPopups.Clear();
                 foreach (NotificationPopup popup in popups)
@@ -309,7 +320,90 @@ namespace MacRando
                 AppLogger.Info("Starting in the notification area; no network-changing action will run.");
             }
             StartNetworkChangeWatch();
+            // Subscribed here, inside the message loop, so the events are raised on the UI
+            // thread where the restore runs.
+            SystemEvents.SessionEnding += OnSessionEnding;
+            SystemEvents.SessionEnded += OnSessionEnded;
+            _sessionEventsSubscribed = true;
             InitialRefresh();
+        }
+
+        /// <summary>
+        /// Windows has asked to end the session. The restore that Exit would run is started
+        /// now, without cancelling the shutdown. See <see cref="SessionEndRestore"/>.
+        /// </summary>
+        private void OnSessionEnding(object sender, SessionEndingEventArgs e)
+        {
+            if (_sessionEndRestore != null)
+            {
+                return;
+            }
+            List<AdapterBackup> pending = SessionEndRestore.Select(
+                new List<string>(_changedAdapterKeysThisSession), FindBackup);
+            if (pending.Count == 0)
+            {
+                return;
+            }
+            AppLogger.Info("The session is ending (" + e.Reason + "); restoring " + pending.Count +
+                " adapter(s) changed in this session before Windows closes MacRando.");
+            _sessionEndWindow = _form.Handle;
+            _form.HoldOpenAtSessionEnd = true;
+            SessionEndRestore.Block(_sessionEndWindow);
+            Task restore = RestoreForSessionEndAsync(pending);
+            // A restore refused at once completes synchronously, before its own cleanup could
+            // clear this, so a completed task is not kept or a later shutdown would skip it.
+            _sessionEndRestore = restore.IsCompleted ? null : restore;
+        }
+
+        /// <summary>
+        /// The session is over and Windows will end the process once this returns, so the
+        /// restore started above is waited for here, with a cap.
+        /// </summary>
+        private void OnSessionEnded(object sender, SessionEndedEventArgs e)
+        {
+            if (_sessionEndRestore == null)
+            {
+                return;
+            }
+            bool finished = SessionEndRestore.WaitPumping(
+                _sessionEndRestore, SessionEndRestore.MaximumWait, Application.DoEvents);
+            AppLogger.Info(finished
+                ? "The session-end restore finished."
+                : "The session-end restore did not finish in time; any profile not restored is kept for the next start.");
+            SessionEndRestore.Unblock(_sessionEndWindow);
+        }
+
+        private async Task RestoreForSessionEndAsync(List<AdapterBackup> pending)
+        {
+            // An operation already running owns the adapter until it finishes, and
+            // RestoreAsync refuses to start alongside it.
+            try
+            {
+                DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+                while ((_busy || _confirmationOpen) && DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(200);
+                }
+                foreach (AdapterBackup backup in pending)
+                {
+                    try
+                    {
+                        await RestoreAsync(backup, false, false);
+                    }
+                    catch (Exception error)
+                    {
+                        AppLogger.Error("A session-end restore failed; its profile is kept for the next start.", error);
+                    }
+                }
+            }
+            finally
+            {
+                // Cleared here as well as when the session ends, because the shutdown can be
+                // cancelled, and then nothing else would lift the block or let the form close.
+                SessionEndRestore.Unblock(_sessionEndWindow);
+                _form.HoldOpenAtSessionEnd = false;
+                _sessionEndRestore = null;
+            }
         }
 
         private void StartNetworkChangeWatch()
@@ -1689,9 +1783,12 @@ namespace MacRando
             bool changeIp,
             string requestedMac,
             bool generateRandomMac,
-            bool automated)
+            bool automated,
+            bool restoreFirst)
         {
-            AdapterBackup backup = FindBackup(adapter == null ? null : adapter.Key);
+            // Only a change that started and then failed leaves its own half-applied state
+            // to recover first. Any other profile belongs to an earlier change.
+            AdapterBackup backup = restoreFirst ? FindBackup(adapter == null ? null : adapter.Key) : null;
             if (backup != null)
             {
                 await RestoreAsync(backup, false);
@@ -2077,8 +2174,15 @@ namespace MacRando
                     }
                     else
                     {
-                        Func<Task> failedRestoreAction = failedBackup == null ? (Func<Task>)null : () => RestoreAsync(failedBackup, false);
-                        Func<Task> retryAction = () => RetryNetworkOperationAsync(adapter, changeMac, changeIp, requestedMac, generateRandomMac, automated);
+                        // Restore is offered, and Retry restores first, only when this change
+                        // started. A change refused before anything was applied shares the
+                        // adapter's profile with an earlier, verified change, and restoring
+                        // it here undid that change instead of retrying this one. The
+                        // notification center's Retry follows CanRestore, so it must be false
+                        // here too.
+                        bool offerRestore = ShouldRollBackFailedChange(changeStarted, failedBackup);
+                        Func<Task> failedRestoreAction = offerRestore ? () => RestoreAsync(failedBackup, false) : (Func<Task>)null;
+                        Func<Task> retryAction = () => RetryNetworkOperationAsync(adapter, changeMac, changeIp, requestedMac, generateRandomMac, automated, offerRestore);
                         FailProgressNotification(
                             progressPopup,
                             adapter.Key,

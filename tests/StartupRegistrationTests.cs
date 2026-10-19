@@ -29,6 +29,7 @@ internal static class StartupRegistrationTests
             TheTaskNameIsFixed();
             TheRunKeyIsNoLongerUsed();
             TheUninstallerRemovesTheTask();
+            AFailedRemovalIsNotReportedAsSuccess();
             Console.WriteLine("startup-registration-tests=OK;checks=" + _checks);
             return 0;
         }
@@ -201,5 +202,54 @@ internal static class StartupRegistrationTests
         Check(Regex.IsMatch(installer, @"-RunLevel\s+Highest"),
             "The installer's logon task is not registered with -RunLevel Highest, so it would " +
             "fail the same way the Run key did.");
+    }
+
+    /// <summary>
+    /// The removal script used to catch every error and report "absent", so a refused
+    /// removal read as success and the task kept starting MacRando at every logon. The
+    /// real script is run against stand-in cmdlets, defined as functions so they shadow
+    /// the real ones, so Task Scheduler is never touched.
+    /// </summary>
+    private static void AFailedRemovalIsNotReportedAsSuccess()
+    {
+        string present = "function Get-ScheduledTask { param($TaskName, $ErrorAction) [pscustomobject]@{ TaskName = $TaskName } }\n" +
+            "function Unregister-ScheduledTask { param($TaskName, $Confirm, $ErrorAction) throw 'Access is denied.' }\n";
+        int refused = RunWithStubs(present);
+        Check(refused != 0, "removing a task that exists but cannot be removed must fail, not report success");
+
+        string absent = "function Get-ScheduledTask { param($TaskName, $ErrorAction) $null }\n" +
+            "function Unregister-ScheduledTask { param($TaskName, $Confirm, $ErrorAction) throw 'must not be called' }\n";
+        Check(RunWithStubs(absent) == 0, "a task that is already gone is the desired end state, so it must succeed");
+
+        string removable = "function Get-ScheduledTask { param($TaskName, $ErrorAction) [pscustomobject]@{ TaskName = $TaskName } }\n" +
+            "function Unregister-ScheduledTask { param($TaskName, $Confirm, $ErrorAction) }\n";
+        Check(RunWithStubs(removable) == 0, "a task that is removed must succeed");
+    }
+
+    private static int RunWithStubs(string stubs)
+    {
+        string script = stubs + MacRando.StartupRegistration.UnregisterScript;
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " +
+                Convert.ToBase64String(Encoding.Unicode.GetBytes(script)),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo))
+        {
+            System.Threading.Tasks.Task<string> output = process.StandardOutput.ReadToEndAsync();
+            System.Threading.Tasks.Task<string> error = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(60000))
+            {
+                try { process.Kill(); } catch { }
+                throw new Exception("the removal script did not finish");
+            }
+            process.WaitForExit();
+            return process.ExitCode;
+        }
     }
 }
