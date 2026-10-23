@@ -152,6 +152,12 @@ internal static class UpgradeRegressionChecks
 
     private static void StateNormalizationCapsAndSanitizes()
     {
+        // The app's own four-part version matches the IPv4 pattern and was logged as [IP].
+        string version = MacRando.AppInfo.Version + ".0";
+        Check(MacRando.AppLogger.Sanitize("installed " + version) == "installed " + version,
+            "the app's own version must not be masked as an IP address");
+        Check(MacRando.AppLogger.Sanitize("from 192.168.1.20") == "from [IP]", "real addresses must still be masked");
+
         var records = new List<MacRando.IpChangeRecord>();
         for (int i = 0; i < 80; i++)
         {

@@ -283,6 +283,11 @@ internal static class NetworkServiceMockTests
             {
                 return sessionEndResult;
             }
+            int changeFlowResult = ChangeFlowTests.Run();
+            if (changeFlowResult != 0)
+            {
+                return changeFlowResult;
+            }
             int sweepResult = ControlSweepTests.Run();
             if (sweepResult != 0)
             {

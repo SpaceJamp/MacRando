@@ -360,7 +360,8 @@ namespace MacRando
                 {
                     NetworkState state = await _network.GetStateAsync(selectedAdapter);
                     report.CurrentMac = AppLogger.MaskMac(state.CurrentMacAddress);
-                    report.PermanentMac = AppLogger.MaskMac(state.MacRegistryValue);
+                    // Not state.MacRegistryValue: the state script fills that with the current MAC.
+                    report.PermanentMac = AppLogger.MaskMac(selectedAdapter.PermanentMacAddress);
                     report.MacProperty = state.MacPropertySupported ? "Available" : "Not exposed";
                     report.IPv4 = AppLogger.MaskIp(state.IpAddress);
                     report.PrefixLength = state.PrefixLength.ToString();

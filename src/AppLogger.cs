@@ -71,7 +71,9 @@ namespace MacRando
             }
             string sanitized = MacPattern.Replace(value, "[MAC]");
             sanitized = CompactMacPattern.Replace(sanitized, "[MAC]");
-            sanitized = IPv4Pattern.Replace(sanitized, "[IP]");
+            // The app's own four-part file version matches the IPv4 pattern; it is not private.
+            sanitized = IPv4Pattern.Replace(sanitized, match =>
+                match.Value == AppInfo.Version + ".0" ? match.Value : "[IP]");
             return sanitized.Replace("\r", " ").Replace("\n", " ").Trim();
         }
 
@@ -90,11 +92,13 @@ namespace MacRando
                         directory,
                         "macrando-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + ".log");
                     File.Move(LogPath, archived);
-                }
 
-                // Rotation only frees the live file's name, so the archives have to be
-                // trimmed here or they accumulate without bound.
-                RetentionPolicy.Apply(directory, ListArchives(directory), KeptLogArchives);
+                    // Rotation only frees the live file's name, so the archives have to be
+                    // trimmed here or they accumulate without bound. Only after a rotation:
+                    // nothing else adds an archive, and listing the folder on every log line
+                    // was wasted work.
+                    RetentionPolicy.Apply(directory, ListArchives(directory), KeptLogArchives);
+                }
             }
             catch
             {

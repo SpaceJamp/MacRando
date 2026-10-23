@@ -56,7 +56,8 @@ $sources = @(
     (Join-Path $root 'src\StartupRegistration.cs'),
     (Join-Path $root 'tests\StartupRegistrationTests.cs'),
     (Join-Path $root 'src\SessionEndRestore.cs'),
-    (Join-Path $root 'tests\SessionEndTests.cs')
+    (Join-Path $root 'tests\SessionEndTests.cs'),
+    (Join-Path $root 'tests\ChangeFlowTests.cs')
 )
 $references = @(
     '/reference:System.dll',

@@ -102,7 +102,7 @@ Write-MacRandoJson64 ([pscustomobject]@{
 })
 ";
 
-        private const string AdapterScript = @"
+        private const string AdapterQuery = @"
 $items = @()
 # All adapters, not just -Physical: an unflagged virtual machine host adapter or tunnel
 # is exactly the case that needs classifying, and filtering it out here would hide it
@@ -170,6 +170,9 @@ foreach ($adapter in @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.Inte
     HardwareInterface = [bool]$adapter.HardwareInterface
   }
 }
+";
+
+        private const string AdapterScript = AdapterQuery + @"
 Write-MacRandoJson64 -Value @($items)
 ";
 
@@ -389,7 +392,6 @@ if ($env:MR_RESTORE_MAC -eq '1') {
     Set-NetAdapterAdvancedProperty -InputObject $property `
       -RegistryValue $env:MR_ORIGINAL_MAC -NoRestart -Confirm:$false -ErrorAction Stop | Out-Null
   } else {
-    $resetDisplayName = if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.DisplayName)) { [string]$property.DisplayName } else { 'Network Address' }
     Reset-NetAdapterAdvancedProperty -InputObject $property `
       -NoRestart -Confirm:$false -ErrorAction Stop | Out-Null
   }
@@ -420,7 +422,6 @@ if ($env:MR_RESTORE_IP -eq '1') {
       Set-DnsClientServerAddress -InterfaceIndex $index -ServerAddresses $staticServers -ErrorAction Stop
     }
   } else {
-    $first = $true
     foreach ($originalIp in $originalIps) {
       $restoredAddress = @{
         InterfaceIndex = $index
@@ -429,7 +430,6 @@ if ($env:MR_RESTORE_IP -eq '1') {
         ErrorAction = 'Stop'
       }
       New-NetIPAddress @restoredAddress | Out-Null
-      $first = $false
     }
     if ([string]::IsNullOrWhiteSpace($env:MR_ORIGINAL_DNS)) {
       Set-DnsClientServerAddress -InterfaceIndex $index -ResetServerAddresses -ErrorAction Stop
@@ -591,90 +591,7 @@ for ($attempt = 0; $attempt -lt 20; $attempt++) {
 throw ('Adapter verification failed: ' + ($lastProblems -join '; '))
 ";
 
-        private const string VpnListScript = @"
-$allProfiles = @()
-try { $allProfiles += @(Get-VpnConnection -ErrorAction SilentlyContinue) } catch { }
-try { $allProfiles += @(Get-VpnConnection -AllUserConnection -ErrorAction SilentlyContinue) } catch { }
-$unique = @{}
-foreach ($profile in $allProfiles) {
-  if ($null -eq $profile -or [string]::IsNullOrWhiteSpace([string]$profile.Name)) { continue }
-  $unique[[string]$profile.Name] = [pscustomobject]@{
-    Name = [string]$profile.Name
-    ServerAddress = [string]$profile.ServerAddress
-    TunnelType = [string]$profile.TunnelType
-    SplitTunneling = [bool]$profile.SplitTunneling
-  }
-}
-Write-MacRandoJson64 -Value @($unique.Values)
-";
-
-        /// <summary>
-        /// One script returning both the adapter list and the VPN profile list.
-        ///
-        /// Identical in what it queries to <see cref="AdapterScript"/> and
-        /// <see cref="VpnListScript"/>, which remain for the paths that need one list on
-        /// its own. Kept as a separate literal rather than assembled from the other two
-        /// because PowerShell here is a verbatim string: the body has to read as a script
-        /// on its own for anyone reading this file, and the tests run the real thing
-        /// against a live machine.
-        ///
-        /// The two halves are independent, so neither depends on the other having
-        /// succeeded. A machine with no VPN profiles, or a cmdlet missing entirely, still
-        /// gets a full adapter list back rather than a failed refresh.
-        /// </summary>
-        private const string SnapshotScript = @"
-$items = @()
-$macPropertiesByPrefix = @{}
-foreach ($property in @(Get-NetAdapterAdvancedProperty -AllProperties -ErrorAction SilentlyContinue |
-    Where-Object { $_.RegistryKeyword -eq 'NetworkAddress' })) {
-  $instance = [string]$property.InstanceID
-  if ([string]::IsNullOrWhiteSpace($instance)) { continue }
-  $separator = $instance.IndexOf('::')
-  if ($separator -le 0) { continue }
-  $macPropertiesByPrefix[$instance.Substring(0, $separator + 2)] = $property
-}
-foreach ($adapter in @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.InterfaceGuid })) {
-  $ipAddress = ''
-  $prefixLength = 0
-  $dhcpEnabled = $false
-  $adapterPrefix = ([string]$adapter.InterfaceGuid) + '::'
-  $macProperty = $macPropertiesByPrefix[$adapterPrefix]
-  try {
-    $configuration = Get-NetIPConfiguration -InterfaceIndex $adapter.InterfaceIndex -ErrorAction Stop
-    $address = @(Get-NetIPAddress -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv4 -ErrorAction Stop |
-      Where-Object { $_.AddressState -eq 'Preferred' -and $_.IPAddress -and $_.IPAddress -notlike '169.254.*' } |
-      Select-Object -First 1)[0]
-    if ($null -ne $address) {
-      $ipAddress = [string]$address.IPAddress
-      $prefixLength = [int]$address.PrefixLength
-    }
-    $interface = @(Get-NetIPInterface -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue)[0]
-    if ($null -ne $interface) {
-      $dhcpEnabled = ([string]$interface.Dhcp -eq 'Enabled')
-    }
-  } catch {
-    # A connected adapter may briefly have no IPv4 configuration.
-  }
-  $items += [pscustomobject]@{
-    Name = [string]$adapter.Name
-    Description = [string]$adapter.InterfaceDescription
-    InterfaceIndex = [int]$adapter.InterfaceIndex
-    MacAddress = [string]$adapter.MacAddress
-    PermanentMacAddress = [string]$adapter.PermanentAddress
-    MacPropertySupported = ($null -ne $macProperty)
-    LinkSpeed = [string]$adapter.LinkSpeed
-    InterfaceGuid = [string]$adapter.InterfaceGuid
-    Status = [string]$adapter.Status
-    IsUp = ([string]$adapter.Status -eq 'Up')
-    IpAddress = $ipAddress
-    PrefixLength = $prefixLength
-    DhcpEnabled = $dhcpEnabled
-    MediaType = [string]$adapter.MediaType
-    NdisPhysicalMedium = [int]$adapter.NdisPhysicalMedium
-    HardwareInterface = [bool]$adapter.HardwareInterface
-  }
-}
-
+        private const string VpnQuery = @"
 $vpnProfiles = @()
 try { $vpnProfiles += @(Get-VpnConnection -ErrorAction SilentlyContinue) } catch { }
 try { $vpnProfiles += @(Get-VpnConnection -AllUserConnection -ErrorAction SilentlyContinue) } catch { }
@@ -688,7 +605,25 @@ foreach ($profile in $vpnProfiles) {
     SplitTunneling = [bool]$profile.SplitTunneling
   }
 }
+";
 
+        private const string VpnListScript = VpnQuery + @"
+Write-MacRandoJson64 -Value @($unique.Values)
+";
+
+        /// <summary>
+        /// One script returning both the adapter list and the VPN profile list.
+        ///
+        /// Built from the same two queries as <see cref="AdapterScript"/> and
+        /// <see cref="VpnListScript"/>, which remain for the paths that need one list on
+        /// its own. It used to be a hand copy of both, which a fix to one would silently
+        /// miss. The tests run the assembled script for real against a live machine.
+        ///
+        /// The two halves are independent, so neither depends on the other having
+        /// succeeded. A machine with no VPN profiles, or a cmdlet missing entirely, still
+        /// gets a full adapter list back rather than a failed refresh.
+        /// </summary>
+        private const string SnapshotScript = AdapterQuery + VpnQuery + @"
 Write-MacRandoJson64 -Value ([pscustomobject]@{
   Adapters = @($items)
   VpnProfiles = @($unique.Values)
@@ -783,7 +718,6 @@ if ($code -ne 0) {
             environment["MR_OLD_IP"] = originalState.IpAddress ?? string.Empty;
             environment["MR_ORIGINAL_IPS"] = JoinDns(originalState.IpAddresses);
             environment["MR_EXPECTED_DHCP"] = originalState.DhcpEnabled ? "1" : "0";
-            environment["MR_GATEWAY"] = originalState.Gateway ?? string.Empty;
             environment["MR_EXPECTED_GATEWAY"] = originalState.Gateway ?? string.Empty;
             environment["MR_DNS"] = JoinDns(originalState.DnsServers);
             return RunNonJsonAsync(ApplyScript, environment);
@@ -815,7 +749,6 @@ if ($code -ne 0) {
 
             Dictionary<string, string> environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                { "MR_ADAPTER_NAME", backup.AdapterName ?? string.Empty },
                 { "MR_ADAPTER_GUID", backup.InterfaceGuid ?? string.Empty },
                 { "MR_RESTORE_MAC", backup.MacChanged ? "1" : "0" },
                 { "MR_RESTORE_IP", backup.IpChanged ? "1" : "0" },
@@ -830,7 +763,6 @@ if ($code -ne 0) {
                 { "MR_ORIGINAL_IP", backup.OriginalIpAddress ?? string.Empty },
                 { "MR_ORIGINAL_IPS", JoinDns(backup.OriginalIpAddresses) },
                 { "MR_ORIGINAL_PREFIX", backup.OriginalPrefixLength.ToString() },
-                { "MR_ORIGINAL_GATEWAY", backup.OriginalGateway ?? string.Empty },
                 { "MR_ORIGINAL_DNS", JoinDns(backup.OriginalDnsServers) },
                 { "MR_ORIGINAL_STATIC_DNS", JoinDns(backup.OriginalStaticDnsServers) }
             };
@@ -1367,7 +1299,6 @@ if ($code -ne 0) {
 
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                { "MR_ADAPTER_NAME", adapter.Name ?? string.Empty },
                 { "MR_ADAPTER_GUID", adapter.InterfaceGuid ?? string.Empty }
             };
         }

@@ -1,5 +1,25 @@
 # MacRando Changelog
 
+## 1.16.12 - 2026.10
+
+### Fixed
+
+- **"Restore original" was undone on exit after a kept MAC.** Restoring the factory MAC ran as an ordinary change, so it saved the kept random MAC as the thing to go back to, and Exit (or shutdown) put the random MAC back. When there was no earlier restore profile, a successful "Restore original" now drops the profile it made and the kept record, so the factory MAC stays.
+- **The diagnostics report showed the current MAC as the "Permanent MAC".** It read a field the adapter query fills with the current address. It now reports the adapter's real permanent address.
+- **Checking for updates froze the window briefly and could hang.** The signature check started PowerShell on the UI thread and never read its error output, so a full error pipe could stall it for good. It now runs off the UI thread, reads both outputs, and gives up after 15 seconds.
+- **The app's own version showed as `[IP]` in logs and notifications.** Four-part version numbers match the IPv4 pattern that privacy masking hides. The app's own version is no longer masked; real addresses still are.
+
+### Changed
+
+- The combined adapter and VPN query is now built from the same two queries the single-list paths use, instead of a 70-line hand copy that a fix to one would miss.
+- Removed values passed to the network scripts that no script read (`MR_ADAPTER_NAME`, `MR_GATEWAY`, `MR_ORIGINAL_GATEWAY`) and two script variables that were set and never used. The gateway ones suggested the gateway was put back, which it is not.
+- Old log files are trimmed only after a log rotates, not on every log line.
+
+### Tests
+
+- `change-flow-tests` (new) drives the real change and restore flow against a fake PowerShell runner: "Restore original" after a kept MAC leaves nothing for Exit to undo, and a change refused before it starts leaves an earlier change alone. Both fail against the previous behaviour. A test constructor now accepts the network service, the administrator check and the change confirmation, so this flow can be tested without a real dialog; an early version that left the real confirmation dialog in place passed or failed depending on how that dialog behaved.
+- The script validation now reports no unused script values, down from three.
+
 ## 1.16.11 - 2026.10
 
 ### Fixed

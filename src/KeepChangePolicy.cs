@@ -139,6 +139,29 @@ namespace MacRando
             return remaining;
         }
 
+        /// <summary>
+        /// After "Restore original" succeeds on an adapter that had no earlier profile: drops
+        /// the profile that change saved and the kept record. That profile's "original" is
+        /// the kept random MAC, so leaving it made Exit put the random MAC back. With an
+        /// earlier profile, that one still holds the true original and is left alone.
+        /// </summary>
+        public static void ApplyRestoreOriginal(AppState state, string adapterKey)
+        {
+            if (state == null || string.IsNullOrWhiteSpace(adapterKey))
+            {
+                return;
+            }
+            if (state.Backups != null)
+            {
+                state.Backups.Remove(adapterKey);
+            }
+            if (state.KeptMacs != null)
+            {
+                state.KeptMacs.RemoveAll(record => record != null &&
+                    string.Equals(record.AdapterKey, adapterKey, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
         public static KeptMacRecord Find(AppState state, string adapterKey)
         {
             if (state == null || state.KeptMacs == null || string.IsNullOrWhiteSpace(adapterKey))

@@ -96,7 +96,8 @@ namespace MacRando
                     return result;
                 }
 
-                string actualThumbprint = GetAuthenticodeThumbprint(destinationPath);
+                // Off the UI thread: starting PowerShell froze the window for a second or two.
+                string actualThumbprint = await Task.Run(() => GetAuthenticodeThumbprint(destinationPath));
                 string manifestThumbprint = manifest.SignerThumbprint.Replace(" ", "").ToUpperInvariant();
                 string configuredThumbprint = (expectedSignerThumbprint ?? string.Empty).Replace(" ", "").ToUpperInvariant();
                 if (string.IsNullOrWhiteSpace(actualThumbprint) ||
@@ -366,9 +367,18 @@ namespace MacRando
                 {
                     return string.Empty;
                 }
-                string output = process.StandardOutput.ReadToEnd().Trim();
-                process.WaitForExit(15000);
-                return ParseSignatureOutput(output);
+                // Both streams drained concurrently: an unread stderr pipe that fills stalls
+                // PowerShell, and a blocking stdout read then waits forever.
+                Task<string> output = process.StandardOutput.ReadToEndAsync();
+                Task<string> error = process.StandardError.ReadToEndAsync();
+                if (!process.WaitForExit(15000))
+                {
+                    try { process.Kill(); } catch { }
+                    return string.Empty;
+                }
+                process.WaitForExit();
+                error.ContinueWith(t => { AggregateException ignored = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+                return ParseSignatureOutput(output.Result);
             }
         }
 

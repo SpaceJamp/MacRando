@@ -74,6 +74,8 @@ namespace MacRando
         private bool _networkBaselineSet;
         private string _lastNetworkKey = string.Empty;
         private int _networkAutoApplyInFlight;
+        private readonly Func<bool> _isAdministrator;
+        private readonly Func<string, DialogResult> _confirmChange;
         private bool _sessionEventsSubscribed;
         private Task _sessionEndRestore;
         private IntPtr _sessionEndWindow;
@@ -95,9 +97,25 @@ namespace MacRando
         /// test that pumps the message loop will happily rewrite the real state file.
         /// </summary>
         internal TrayContext(bool startupLaunch, string dataRoot)
+            : this(startupLaunch, dataRoot, null, null, null)
+        {
+        }
+
+        /// <summary>
+        /// <paramref name="network"/> and <paramref name="isAdministrator"/> let a test drive
+        /// the real change and restore flow against a fake PowerShell runner, and
+        /// <paramref name="confirmChange"/> answers the change confirmation, so a test never
+        /// depends on how a real dialog behaves.
+        /// </summary>
+        internal TrayContext(bool startupLaunch, string dataRoot, NetworkService network, Func<bool> isAdministrator,
+            Func<string, DialogResult> confirmChange)
         {
             _startupLaunch = startupLaunch;
-            _network = new NetworkService();
+            _network = network ?? new NetworkService();
+            _isAdministrator = isAdministrator ?? IsAdministrator;
+            _confirmChange = confirmChange ?? (text => MessageBox.Show(
+                _form, text, "Confirm network change",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2));
             _stateStore = dataRoot == null ? new StateStore() : new StateStore(dataRoot);
             try
             {
@@ -1630,12 +1648,12 @@ namespace MacRando
             RefreshMenus();
         }
 
-        private Task RestorePermanentMacAsync(AdapterInfo adapter)
+        private async Task RestorePermanentMacAsync(AdapterInfo adapter)
         {
             if (adapter == null || string.IsNullOrWhiteSpace(adapter.PermanentMacAddress))
             {
                 ShowError(new InvalidOperationException("The selected adapter does not expose a permanent MAC address."));
-                return Task.FromResult(0);
+                return;
             }
 
             if (string.Equals(
@@ -1644,10 +1662,22 @@ namespace MacRando
                 StringComparison.OrdinalIgnoreCase))
             {
                 _form.SetStatus("The adapter is already using its permanent MAC address.");
-                return Task.FromResult(0);
+                return;
             }
 
-            return ManualMacAsync(adapter, adapter.PermanentMacAddress);
+            bool hadProfile = FindBackup(adapter.Key) != null;
+            if (!await ChangeNetworkAsync(adapter, true, false, adapter.PermanentMacAddress, false) || hadProfile)
+            {
+                return;
+            }
+            AppState stateFile = _stateStore.Load();
+            KeepChangePolicy.ApplyRestoreOriginal(stateFile, adapter.Key);
+            _stateStore.Save(stateFile);
+            _state = stateFile;
+            _changedAdapterKeysThisSession.Remove(adapter.Key);
+            UpdatePendingRestoreBanner();
+            UpdateFormBackupState();
+            RefreshMenus();
         }
 
         private Task RandomizeAsync(AdapterInfo adapter, bool changeMac, bool changeIp)
@@ -1797,7 +1827,7 @@ namespace MacRando
             await ChangeNetworkAsync(adapter, changeMac, changeIp, requestedMac, generateRandomMac, automated);
         }
 
-        private async Task ChangeNetworkAsync(
+        private async Task<bool> ChangeNetworkAsync(
             AdapterInfo adapter,
             bool changeMac,
             bool changeIp,
@@ -1807,13 +1837,13 @@ namespace MacRando
         {
             if (_busy || _confirmationOpen)
             {
-                return;
+                return false;
             }
 
             if (adapter == null)
             {
                 ShowError(new InvalidOperationException("Select a physical network adapter first."));
-                return;
+                return false;
             }
 
             if (!automated)
@@ -1823,21 +1853,21 @@ namespace MacRando
 
             if (!changeMac && !changeIp)
             {
-                return;
+                return false;
             }
 
             string blockedReason;
             if (IsNetworkChangeBlocked(out blockedReason))
             {
                 ShowError(new InvalidOperationException(blockedReason));
-                return;
+                return false;
             }
 
             if (changeIp && adapter.DhcpEnabled && !HasDhcpConsent(adapter))
             {
                 ShowError(new InvalidOperationException(
                     "This adapter is using DHCP. Select it and enable the DHCP IP randomization checkbox only if you understand the collision risk."));
-                return;
+                return false;
             }
 
             string validatedManualMac = null;
@@ -1850,7 +1880,7 @@ namespace MacRando
                 catch (Exception error)
                 {
                     ShowError(error);
-                    return;
+                    return false;
                 }
             }
 
@@ -1887,17 +1917,12 @@ namespace MacRando
                 RefreshMenus();
                 try
                 {
-                    confirmation = MessageBox.Show(
-                        _form,
+                    confirmation = _confirmChange(
                         "MacRando will " + action + " on '" + adapter.Name + "'.\n\n" +
                         "The adapter will restart and the connection may briefly drop. A restore profile will be saved." +
                         (changeIp ? " Local IP randomization is best-effort and cannot guarantee protection from DHCP or device conflicts." : string.Empty) +
                         preflightSummary +
-                        "\n\nContinue?",
-                        "Confirm network change",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Warning,
-                        MessageBoxDefaultButton.Button2);
+                        "\n\nContinue?");
                 }
                 finally
                 {
@@ -1908,12 +1933,12 @@ namespace MacRando
 
             if (confirmation != DialogResult.Yes)
             {
-                return;
+                return false;
             }
 
             if (!EnsureAdministrator())
             {
-                return;
+                return false;
             }
 
             AppLogger.Info("Network change requested: adapter=" + AppLogger.MaskMac(adapter.MacAddress) + ", mac=" + changeMac + ", ip=" + changeIp);
@@ -2217,6 +2242,7 @@ namespace MacRando
             {
                 SetBusy(false);
             }
+            return changeVerified && operationError == null;
         }
 
         /// <summary>
@@ -3768,7 +3794,7 @@ namespace MacRando
 
         private bool EnsureAdministrator()
         {
-            if (IsAdministrator())
+            if (_isAdministrator())
             {
                 return true;
             }
