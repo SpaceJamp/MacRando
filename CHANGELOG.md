@@ -1,5 +1,11 @@
 # MacRando Changelog
 
+## 1.17.1 - 2026.10
+
+### Changed
+
+- Patch release: no code changes. Rebuilt and republished to confirm the release pipeline end to end.
+
 ## 1.17.0 - 2026.10
 
 ### Added
