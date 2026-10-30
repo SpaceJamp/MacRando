@@ -1,5 +1,19 @@
 # MacRando Changelog
 
+## 1.17.0 - 2026.10
+
+### Added
+
+- **MAC OUI vendor lookup.** The "MAC address" card now shows the manufacturer registered to the first three bytes of the current MAC address (Intel, Realtek, Apple, VMware, ...), from a bundled IEEE OUI database. Read-only and offline: no network access and no consent prompt, matching the read-only inspector approach chosen for device tracking identifiers. Unknown prefixes report "Unknown" rather than guessing. 18 unit tests cover the lookup, separator handling, malformed input, and the parser.
+
+### Changed
+
+- The full test suite no longer steals the screen: every UI test now shows its window off-screen with no taskbar button.
+
+### Tests
+
+- `oui-tests` (18 checks) and `public-ip-tests` (33 checks) and `notification-tests` (69 checks) added. `control-sweep-tests` now covers 2,016 controls.
+
 ## 1.16.12 - 2026.10
 
 ### Fixed
