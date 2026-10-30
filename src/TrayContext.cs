@@ -4190,31 +4190,12 @@ namespace MacRando
 
         private bool ShouldDisplayNotification(string severity)
         {
-            if (!_settings.NotificationsEnabled)
-            {
-                return false;
-            }
-            if (_settings.NotificationQuietHoursEnabled &&
-                !NotificationKinds.IsCritical(severity) &&
-                IsQuietHours())
-            {
-                return false;
-            }
-            return true;
+            return NotificationDisplayPolicy.ShouldDisplay(_settings, severity, DateTime.Now.Hour);
         }
 
         private bool IsQuietHours()
         {
-            int start = Math.Max(0, Math.Min(23, _settings.NotificationQuietHoursStartHour));
-            int end = Math.Max(0, Math.Min(23, _settings.NotificationQuietHoursEndHour));
-            int now = DateTime.Now.Hour;
-            if (start == end)
-            {
-                return false;
-            }
-            return start < end
-                ? now >= start && now < end
-                : now >= start || now < end;
+            return NotificationDisplayPolicy.IsQuietHours(_settings, DateTime.Now.Hour);
         }
 
         private void PlayNotificationSound(string severity)

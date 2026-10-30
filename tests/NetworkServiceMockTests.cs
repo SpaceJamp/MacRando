@@ -298,6 +298,11 @@ internal static class NetworkServiceMockTests
             {
                 return publicIpResult;
             }
+            int notificationResult = NotificationTests.Run();
+            if (notificationResult != 0)
+            {
+                return notificationResult;
+            }
             return 0;
         }
         catch (Exception error)
