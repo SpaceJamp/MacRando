@@ -154,6 +154,8 @@ namespace MacRando
         public string ModifiedIpAddress { get; set; }
         public bool MacChanged { get; set; }
         public bool IpChanged { get; set; }
+        public bool DnsChanged { get; set; }
+        public string[] ModifiedDnsServers { get; set; }
         public DateTime SavedAtUtc { get; set; }
         public DateTime LastOperationUtc { get; set; }
 

@@ -371,6 +371,28 @@ if ($env:MR_CHANGE_IP -eq '1') {
 Restart-NetAdapter -InputObject $adapter -Confirm:$false -ErrorAction Stop
 ";
 
+        private const string DnsScript = @"
+$adapterGuid = [string]$env:MR_ADAPTER_GUID
+if ([string]::IsNullOrWhiteSpace($adapterGuid)) { throw 'The selected adapter has no stable interface GUID.' }
+$matches = @(Get-NetAdapter -ErrorAction Stop | Where-Object {
+  ([string]$_.InterfaceGuid) -eq $adapterGuid
+})
+if ($matches.Count -ne 1) { throw 'The selected adapter GUID is not unique or is no longer available.' }
+$adapter = $matches[0]
+$index = [int]$adapter.InterfaceIndex
+
+if ($env:MR_DNS_MODE -eq 'reset') {
+  Set-DnsClientServerAddress -InterfaceIndex $index -ResetServerAddresses -ErrorAction Stop
+} else {
+  $servers = @($env:MR_DNS_SERVERS -split '\|' | Where-Object { $_ })
+  if ($servers.Count -eq 0) {
+    Set-DnsClientServerAddress -InterfaceIndex $index -ResetServerAddresses -ErrorAction Stop
+  } else {
+    Set-DnsClientServerAddress -InterfaceIndex $index -ServerAddresses $servers -ErrorAction Stop
+  }
+}
+";
+
         private const string RestoreScript = @"
 $adapterGuid = [string]$env:MR_ADAPTER_GUID
 if ([string]::IsNullOrWhiteSpace($adapterGuid)) { throw 'The saved adapter has no stable interface GUID.' }
@@ -440,6 +462,15 @@ if ($env:MR_RESTORE_IP -eq '1') {
   }
 }
 
+if ($env:MR_RESTORE_DNS -eq '1') {
+  if ([string]::IsNullOrWhiteSpace($env:MR_ORIGINAL_DNS)) {
+    Set-DnsClientServerAddress -InterfaceIndex $index -ResetServerAddresses -ErrorAction Stop
+  } else {
+    $servers = @($env:MR_ORIGINAL_DNS -split '\|' | Where-Object { $_ })
+    Set-DnsClientServerAddress -InterfaceIndex $index -ServerAddresses $servers -ErrorAction Stop
+  }
+}
+
 Restart-NetAdapter -InputObject $adapter -Confirm:$false -ErrorAction Stop
 ";
 
@@ -448,6 +479,7 @@ $adapterGuid = [string]$env:MR_ADAPTER_GUID
 if ([string]::IsNullOrWhiteSpace($adapterGuid)) { throw 'The saved adapter has no stable interface GUID.' }
 $verifyMac = $env:MR_VERIFY_MAC -eq '1'
 $verifyIp = $env:MR_VERIFY_IP -eq '1'
+$verifyDns = $env:MR_VERIFY_DNS -eq '1'
 $lastProblems = @()
 
 for ($attempt = 0; $attempt -lt 20; $attempt++) {
@@ -461,6 +493,8 @@ for ($attempt = 0; $attempt -lt 20; $attempt++) {
   } else {
     $currentAdapter = $currentMatches[0]
   }
+  $index = 0
+  if ($null -ne $currentAdapter) { $index = [int]$currentAdapter.InterfaceIndex }
   if ($verifyMac -and $null -ne $currentAdapter) {
     $actualMac = ([string]$currentAdapter.MacAddress) -replace '[^0-9A-Fa-f]', ''
     $expectedMac = ([string]$env:MR_EXPECTED_MAC) -replace '[^0-9A-Fa-f]', ''
@@ -580,6 +614,23 @@ for ($attempt = 0; $attempt -lt 20; $attempt++) {
           ($expectedDns.Count -gt 0 -and @(Compare-Object -ReferenceObject $expectedDns -DifferenceObject $actualDns).Count -gt 0)) {
         $problems += 'the original DNS servers do not match'
       }
+    }
+  }
+
+  if ($verifyDns -and -not $verifyIp -and $null -ne $currentAdapter) {
+    $configuration = Get-NetIPConfiguration -InterfaceIndex $index -ErrorAction SilentlyContinue
+    $expectedDns = @($env:MR_EXPECTED_DNS -split '\|' | Where-Object { $_ } | ForEach-Object {
+      try { [Net.IPAddress]::Parse([string]$_).ToString() } catch { [string]$_ }
+    } | Sort-Object -Unique)
+    $actualDns = @()
+    if ($null -ne $configuration -and $null -ne $configuration.DNSServer) {
+      $actualDns = @($configuration.DNSServer.ServerAddresses | Where-Object { $_ } | ForEach-Object {
+        try { [Net.IPAddress]::Parse([string]$_).ToString() } catch { [string]$_ }
+      } | Sort-Object -Unique)
+    }
+    if ($expectedDns.Count -ne $actualDns.Count -or
+        ($expectedDns.Count -gt 0 -and @(Compare-Object -ReferenceObject $expectedDns -DifferenceObject $actualDns).Count -gt 0)) {
+      $problems += 'the DNS servers are not assigned'
     }
   }
 
@@ -723,6 +774,31 @@ if ($code -ne 0) {
             return RunNonJsonAsync(ApplyScript, environment);
         }
 
+        public Task ApplyDnsAsync(AdapterInfo adapter, string[] dnsServers)
+        {
+            if (adapter == null)
+            {
+                throw new ArgumentNullException("adapter");
+            }
+            if (string.IsNullOrWhiteSpace(adapter.InterfaceGuid))
+            {
+                throw new InvalidOperationException("The selected adapter has no stable interface GUID.");
+            }
+
+            Dictionary<string, string> environment = AdapterEnvironment(adapter);
+            if (dnsServers == null || dnsServers.Length == 0)
+            {
+                environment["MR_DNS_MODE"] = "reset";
+                environment["MR_DNS_SERVERS"] = string.Empty;
+            }
+            else
+            {
+                environment["MR_DNS_MODE"] = "set";
+                environment["MR_DNS_SERVERS"] = JoinDns(dnsServers);
+            }
+            return RunNonJsonAsync(DnsScript, environment);
+        }
+
         public Task RestoreAsync(AdapterBackup backup)
         {
             if (backup == null)
@@ -735,7 +811,7 @@ if ($code -ne 0) {
                 throw new InvalidOperationException("The saved adapter has no stable interface GUID.");
             }
 
-            if (!backup.MacChanged && !backup.IpChanged)
+            if (!backup.MacChanged && !backup.IpChanged && !backup.DnsChanged)
             {
                 throw new InvalidDataException("The saved restore profile contains no requested changes.");
             }
@@ -752,6 +828,7 @@ if ($code -ne 0) {
                 { "MR_ADAPTER_GUID", backup.InterfaceGuid ?? string.Empty },
                 { "MR_RESTORE_MAC", backup.MacChanged ? "1" : "0" },
                 { "MR_RESTORE_IP", backup.IpChanged ? "1" : "0" },
+                { "MR_RESTORE_DNS", backup.DnsChanged ? "1" : "0" },
                 { "MR_ORIGINAL_MAC", NormalizeMac(
                     string.IsNullOrWhiteSpace(backup.OriginalMacOverrideValue)
                         ? backup.OriginalMacRegistryValue
@@ -781,7 +858,7 @@ if ($code -ne 0) {
                 throw new InvalidOperationException("The saved adapter has no stable interface GUID.");
             }
 
-            if (!backup.MacChanged && !backup.IpChanged)
+            if (!backup.MacChanged && !backup.IpChanged && !backup.DnsChanged)
             {
                 throw new InvalidDataException("The saved restore profile contains no requested changes.");
             }
@@ -798,6 +875,7 @@ if ($code -ne 0) {
                 { "MR_ADAPTER_GUID", backup.InterfaceGuid },
                 { "MR_VERIFY_MAC", backup.MacChanged ? "1" : "0" },
                 { "MR_VERIFY_IP", backup.IpChanged ? "1" : "0" },
+                { "MR_VERIFY_DNS", backup.DnsChanged ? "1" : "0" },
                 { "MR_EXPECTED_MAC", GetOriginalMacAddress(backup) },
                 { "MR_EXPECTED_MAC_OVERRIDE_PRESENT", HasMacOverride(backup) ? "1" : "0" },
                 { "MR_EXPECTED_MAC_OVERRIDE_VALUE", NormalizeMac(

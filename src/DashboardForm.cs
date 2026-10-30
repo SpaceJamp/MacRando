@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Net;
 using System.Windows.Forms;
 
 namespace MacRando
@@ -205,6 +206,10 @@ namespace MacRando
         private readonly Label _networkIpLabel;
         private readonly Label _networkModeLabel;
         private readonly Label _networkLinkLabel;
+        private readonly Label _networkDnsLabel;
+        private readonly ComboBox _dnsCombo;
+        private readonly Button _applyDnsButton;
+        private string[] _pendingCustomDnsServers;
         private readonly Label _publicIpLabel;
         private readonly Label _publicIpLocationLabel;
         private TableLayoutPanel _publicIpCell;
@@ -243,6 +248,7 @@ namespace MacRando
         public event EventHandler KeepChangeRequested;
         public event EventHandler DhcpIpConsentChanged;
         public event EventHandler PublicIpLocationConsentChanged;
+        public event EventHandler DnsChangeRequested;
         public event EventHandler RandomizeIpRequested;
         public event EventHandler RestoreRequested;
         public event EventHandler ConnectVpnRequested;
@@ -279,6 +285,21 @@ namespace MacRando
         public bool ShowPublicIpLocation
         {
             get { return _showPublicIpLocationCheckBox != null && _showPublicIpLocationCheckBox.Checked; }
+        }
+
+        /// <summary>
+        /// The DNS servers to apply for the most recent Apply DNS request. Null means
+        /// reset to automatic (DHCP). Set by the button click handler before the event
+        /// is raised, so the handler can run the custom-entry dialog first.
+        /// </summary>
+        public string[] PendingDnsServers
+        {
+            get { return _pendingCustomDnsServers; }
+        }
+
+        public int SelectedDnsComboIndex
+        {
+            get { return _dnsCombo.SelectedIndex; }
         }
 
         public bool DarkModeEnabled
@@ -373,6 +394,19 @@ namespace MacRando
             _networkIpLabel = MakeValueLabel("—");
             _networkModeLabel = MakeValueLabel("—");
             _networkLinkLabel = MakeMutedLabel("—");
+            _networkDnsLabel = MakeMutedLabel("—");
+            _dnsCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+            _dnsCombo.Items.AddRange(new object[]
+            {
+                "DHCP (automatic)",
+                "Google (8.8.8.8, 8.8.4.4)",
+                "Cloudflare (1.1.1.1, 1.0.0.1)",
+                "Quad9 (9.9.9.9, 149.112.112.112)",
+                "OpenDNS (208.67.222.222, 208.67.220.220)",
+                "Custom..."
+            });
+            _dnsCombo.SelectedIndex = 0;
+            _applyDnsButton = MakeButton("Apply DNS", false, new Size(96, 28));
             _publicIpLabel = MakeValueLabel(PublicIpUnavailable);
             // The location used to exist only as a tooltip on the public IP label, which made
             // an opt-in feature look permanently broken: nothing on screen changed when it
@@ -891,6 +925,89 @@ namespace MacRando
             _toolTip.SetToolTip(_operationStatusLabel, status);
         }
 
+        /// <summary>
+        /// The DNS servers implied by the current selection of the DNS combo, or null
+        /// for "DHCP (automatic)", which resets the adapter to automatic DNS. Returns
+        /// null when the user cancels the custom entry dialog.
+        /// </summary>
+        public string[] GetSelectedDnsServers()
+        {
+            switch (_dnsCombo.SelectedIndex)
+            {
+                case 0: return null; // DHCP
+                case 1: return new[] { "8.8.8.8", "8.8.4.4" };
+                case 2: return new[] { "1.1.1.1", "1.0.0.1" };
+                case 3: return new[] { "9.9.9.9", "149.112.112.112" };
+                case 4: return new[] { "208.67.222.222", "208.67.220.220" };
+                case 5:
+                    string input = PromptForCustomDns();
+                    if (input == null)
+                    {
+                        return null;
+                    }
+                    return ParseDnsList(input);
+                default: return null;
+            }
+        }
+
+        private string PromptForCustomDns()
+        {
+            using (Form dialog = new Form())
+            {
+                dialog.Text = "Custom DNS servers";
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.ClientSize = new Size(420, 120);
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+
+                Label label = new Label
+                {
+                    Text = "Enter one or more DNS server addresses, separated by commas or spaces.",
+                    Dock = DockStyle.Top,
+                    Height = 36,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Padding = new Padding(12, 8, 12, 0)
+                };
+                TextBox box = new TextBox { Dock = DockStyle.Top, Margin = new Padding(12, 4, 12, 4) };
+                FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, Height = 40, Padding = new Padding(8) };
+                Button ok = new Button { Text = "OK", DialogResult = DialogResult.OK, AutoSize = true };
+                Button cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true };
+                buttons.Controls.Add(cancel);
+                buttons.Controls.Add(ok);
+                dialog.Controls.Add(buttons);
+                dialog.Controls.Add(box);
+                dialog.Controls.Add(label);
+                dialog.AcceptButton = ok;
+                dialog.CancelButton = cancel;
+
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return null;
+                }
+                return box.Text;
+            }
+        }
+
+        private static string[] ParseDnsList(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                return null;
+            }
+            var servers = new List<string>();
+            foreach (string part in input.Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string trimmed = part.Trim();
+                IPAddress parsed;
+                if (IPAddress.TryParse(trimmed, out parsed))
+                {
+                    servers.Add(trimmed);
+                }
+            }
+            return servers.Count == 0 ? null : servers.ToArray();
+        }
+
         public void ClearManualMacInput()
         {
             _macTextBox.Clear();
@@ -1114,6 +1231,12 @@ namespace MacRando
                 "The original address is recorded so you can still get back to it.");
             Accessibility.Describe(_headerPublicIpLabel, "Public IP address", AccessibleRole.Text,
                 "The public IP address seen by websites from this machine.");
+            Accessibility.Describe(_dnsCombo, "DNS server selection", AccessibleRole.ComboBox,
+                "Chooses which DNS servers are used by the selected adapter. Presets for common " +
+                "providers, or a custom list.");
+            Accessibility.Describe(_applyDnsButton, "Apply DNS servers", AccessibleRole.PushButton,
+                "Applies the selected DNS servers to the selected adapter. The original servers " +
+                "are restored on exit.");
             Accessibility.Describe(_currentMacVendorLabel, "MAC address vendor", AccessibleRole.Text,
                 "The manufacturer registered to the first three bytes of the current MAC address, " +
                 "from the bundled IEEE OUI list. Read-only; no network access is used.");
@@ -1762,8 +1885,8 @@ namespace MacRando
             AddPageRow(page, macCard);
 
             TableLayoutPanel networkBody;
-            TableLayoutPanel networkCard = CreateCard("Local network", 2, 4, out networkBody);
-            SetBodyRows(networkBody, 22, 30, 30, -1);
+            TableLayoutPanel networkCard = CreateCard("Local network", 2, 5, out networkBody);
+            SetBodyRows(networkBody, 22, 30, 30, 28, -1);
             AddCellLabel(networkBody, "IPv4 address", 0, 0);
             AddCellLabel(networkBody, "Mode", 1, 0);
             ConfigureValueCell(_networkIpLabel);
@@ -1773,7 +1896,14 @@ namespace MacRando
             AddCellLabel(networkBody, "Link", 0, 2);
             ConfigureValueCell(_networkLinkLabel);
             networkBody.Controls.Add(_networkLinkLabel, 1, 2);
-            networkBody.Controls.Add(CreateActionGrid(1, _randomizeIpButton), 1, 3);
+            AddCellLabel(networkBody, "DNS", 0, 3);
+            _dnsCombo.Dock = DockStyle.Fill;
+            _dnsCombo.Margin = Padding.Empty;
+            _networkDnsLabel.Dock = DockStyle.Fill;
+            _networkDnsLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _networkDnsLabel.Margin = Padding.Empty;
+            networkBody.Controls.Add(_dnsCombo, 1, 3);
+            networkBody.Controls.Add(CreateActionGrid(2, _randomizeIpButton, _applyDnsButton), 1, 4);
             AddPageRow(page, networkCard);
 
             TableLayoutPanel vpnBody;
@@ -1862,6 +1992,34 @@ namespace MacRando
             _applyMacButton.Click += (sender, args) => Raise(ManualMacRequested);
             _restorePermanentButton.Click += (sender, args) => Raise(RestorePermanentRequested);
             _randomizeIpButton.Click += (sender, args) => Raise(RandomizeIpRequested);
+            _applyDnsButton.Click += (sender, args) =>
+            {
+                switch (_dnsCombo.SelectedIndex)
+                {
+                    case 0: _pendingCustomDnsServers = null; break; // DHCP
+                    case 1: _pendingCustomDnsServers = new[] { "8.8.8.8", "8.8.4.4" }; break;
+                    case 2: _pendingCustomDnsServers = new[] { "1.1.1.1", "1.0.0.1" }; break;
+                    case 3: _pendingCustomDnsServers = new[] { "9.9.9.9", "149.112.112.112" }; break;
+                    case 4: _pendingCustomDnsServers = new[] { "208.67.222.222", "208.67.220.220" }; break;
+                    case 5:
+                        string input = PromptForCustomDns();
+                        if (input == null)
+                        {
+                            return; // cancelled
+                        }
+                        string[] parsed = ParseDnsList(input);
+                        if (parsed == null)
+                        {
+                            MessageBox.Show(this, "No valid DNS server addresses were entered.", "Custom DNS",
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
+                        _pendingCustomDnsServers = parsed;
+                        break;
+                    default: _pendingCustomDnsServers = null; break;
+                }
+                Raise(DnsChangeRequested);
+            };
             _restoreButton.Click += (sender, args) => Raise(RestoreRequested);
             _connectVpnButton.Click += (sender, args) => Raise(ConnectVpnRequested);
             _disconnectVpnButton.Click += (sender, args) => Raise(DisconnectVpnRequested);

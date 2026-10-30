@@ -260,6 +260,14 @@ namespace MacRando
                 RefreshFormPresets();
             };
             _form.DhcpIpConsentChanged += (sender, args) => RefreshMenus();
+            _form.DnsChangeRequested += async (sender, args) =>
+            {
+                if (_form.SelectedAdapter == null)
+                {
+                    return;
+                }
+                await ChangeDnsAsync(_form.SelectedAdapter, _form.PendingDnsServers);
+            };
             _form.PublicIpLocationConsentChanged += async (sender, args) =>
             {
                 _settings.ShowPublicIpLocation = _form.ShowPublicIpLocation;
@@ -2393,6 +2401,131 @@ namespace MacRando
             finally
             {
                 SetBusy(previousBusy);
+            }
+        }
+
+        private async Task ChangeDnsAsync(AdapterInfo adapter, string[] dnsServers)
+        {
+            if (adapter == null)
+            {
+                return;
+            }
+            if ((_busy) || _confirmationOpen)
+            {
+                return;
+            }
+            if (!EnsureAdministrator())
+            {
+                return;
+            }
+
+            NetworkState state;
+            try
+            {
+                state = await _network.GetStateAsync(adapter);
+            }
+            catch (Exception error)
+            {
+                ShowError(error);
+                return;
+            }
+            if (state == null)
+            {
+                ShowError(new InvalidOperationException("The adapter state could not be read."));
+                return;
+            }
+
+            SetBusy(true);
+            try
+            {
+                _form.SetStatus("Changing DNS servers...");
+                AppState stateFile = _stateStore.Load();
+                if (stateFile.PendingOperation != null)
+                {
+                    ShowError(new InvalidOperationException(
+                        "A previous MacRando operation was interrupted and needs recovery. Restore the saved adapter configuration before starting another change."));
+                    return;
+                }
+
+                AdapterBackup backup = FindBackupIn(stateFile, adapter.Key);
+                if (backup == null)
+                {
+                    backup = new AdapterBackup
+                    {
+                        AdapterKey = adapter.Key,
+                        AdapterName = adapter.Name,
+                        AdapterDescription = adapter.Description,
+                        InterfaceGuid = adapter.InterfaceGuid,
+                        InterfaceIndex = state.InterfaceIndex,
+                        OriginalMacAddress = state.CurrentMacAddress,
+                        OriginalMacRegistryValue = state.MacOverrideValue ?? string.Empty,
+                        OriginalMacOverrideValue = state.MacOverrideValue ?? string.Empty,
+                        OriginalMacOverridePresent = state.MacOverridePresent,
+                        OriginalMacDisplayValue = state.MacDisplayValue,
+                        OriginalIpAddress = state.IpAddress,
+                        OriginalPrefixLength = state.PrefixLength,
+                        OriginalGateway = state.Gateway,
+                        OriginalDhcpEnabled = state.DhcpEnabled,
+                        OriginalIpAddresses = state.IpAddresses ?? new string[0],
+                        OriginalStaticDnsServers = state.StaticDnsServers ?? new string[0],
+                        OriginalDnsServers = state.DnsServers ?? new string[0],
+                        MacChanged = false,
+                        IpChanged = false,
+                        DnsChanged = true,
+                        ModifiedDnsServers = dnsServers == null ? new string[0] : (string[])dnsServers.Clone(),
+                        SavedAtUtc = DateTime.UtcNow
+                    };
+                    stateFile.Backups[adapter.Key] = backup;
+                }
+                else
+                {
+                    if (!backup.DnsChanged)
+                    {
+                        backup.OriginalDnsServers = state.DnsServers ?? new string[0];
+                        backup.OriginalStaticDnsServers = state.StaticDnsServers ?? new string[0];
+                    }
+                    backup.DnsChanged = true;
+                    backup.ModifiedDnsServers = dnsServers == null ? new string[0] : (string[])dnsServers.Clone();
+                    backup.AdapterName = adapter.Name;
+                    backup.AdapterDescription = adapter.Description;
+                    backup.InterfaceGuid = state.InterfaceGuid;
+                    backup.InterfaceIndex = state.InterfaceIndex;
+                }
+
+                stateFile.PendingOperation = new PendingOperation
+                {
+                    AdapterKey = adapter.Key,
+                    Action = "change DNS servers",
+                    StartedAtUtc = DateTime.UtcNow
+                };
+                _stateStore.Save(stateFile);
+                _state = stateFile;
+
+                await _network.ApplyDnsAsync(adapter, dnsServers);
+
+                stateFile.PendingOperation = null;
+                _stateStore.Save(stateFile);
+                _state = stateFile;
+
+                _changedAdapterKeysThisSession.Add(adapter.Key);
+                UpdateFormBackupState();
+                await RefreshAllAsync(true);
+                _form.SetStatus("DNS servers changed. The original servers will be restored on exit.");
+                RecordOperation(adapter, "change DNS servers", false, false,
+                    "DNS servers changed to " + (dnsServers == null || dnsServers.Length == 0
+                        ? "DHCP"
+                        : string.Join(", ", dnsServers)));
+                AppLogger.Info("DNS changed for " + AppLogger.Sanitize(adapter.Name));
+            }
+            catch (Exception error)
+            {
+                _form.SetStatus("DNS change did not complete; the original servers are kept.");
+                ShowError(error);
+                AppLogger.Error("DNS change failed.", error);
+            }
+            finally
+            {
+                SetBusy(false);
             }
         }
 

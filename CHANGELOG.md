@@ -6,6 +6,8 @@
 
 - **MAC OUI vendor lookup.** The "MAC address" card now shows the manufacturer registered to the first three bytes of the current MAC address (Intel, Realtek, Apple, VMware, ...), from a bundled IEEE OUI database. Read-only and offline: no network access and no consent prompt, matching the read-only inspector approach chosen for device tracking identifiers. Unknown prefixes report "Unknown" rather than guessing. 18 unit tests cover the lookup, separator handling, malformed input, and the parser.
 
+- **DNS swap.** A dropdown on the "Local network" card: DHCP (automatic), Google, Cloudflare, Quad9, OpenDNS, or a custom list. Applies to the selected adapter; the original servers are saved in the restore profile and restored on exit, the same way MAC and IP changes are. No adapter restart is needed for a DNS-only change.
+
 ### Changed
 
 - The full test suite no longer steals the screen: every UI test now shows its window off-screen with no taskbar button.
