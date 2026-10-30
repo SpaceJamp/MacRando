@@ -75,7 +75,7 @@ internal static class AccessibilityTests
             using (DashboardForm form = new DashboardForm())
             {
                 form.CreateControl();
-                form.Show();
+                TestHelpers.ShowOffScreen(form);
                 Application.DoEvents();
 
                 Check(!SystemInformation.HighContrast,
@@ -414,7 +414,7 @@ internal static class AccessibilityTests
                 new AppSettings(), new List<NotificationHistoryEntry>(), false))
             {
                 center.CreateControl();
-                center.Show();
+                TestHelpers.ShowOffScreen(center);
                 Application.DoEvents();
                 var unnamed = new List<string>();
                 foreach (Control control in Descendants(center))
@@ -465,7 +465,7 @@ internal static class AccessibilityTests
                 new AppSettings(), new List<NotificationHistoryEntry>(), false))
             {
                 center.CreateControl();
-                center.Show();
+                TestHelpers.ShowOffScreen(center);
                 Application.DoEvents();
 
                 // The settings fields are the reason this ordering is asserted: they hold
@@ -562,7 +562,7 @@ internal static class AccessibilityTests
                 new AppSettings(), new List<NotificationHistoryEntry>(), false))
             {
                 center.CreateControl();
-                center.Show();
+                TestHelpers.ShowOffScreen(center);
                 Application.DoEvents();
 
                 // On a machine without high contrast this machine's real value stands, so

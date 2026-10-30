@@ -412,7 +412,7 @@ internal static class LayoutTests
     private static void Settle(Form form)
     {
         form.CreateControl();
-        form.Show();
+        TestHelpers.ShowOffScreen(form);
         Application.DoEvents();
         form.PerformLayout();
         foreach (Control c in All(form))
@@ -1017,7 +1017,7 @@ internal static class LayoutTests
                     }
                     Check(first.Width == 430, "the popup is " + first.Width + "px wide at 100%");
                     popup.Location = new Point(-5000, -5000);
-                    popup.Show();
+                    TestHelpers.ShowOffScreen(popup);
                     Application.DoEvents();
                     Check(popup.ClientSize == first,
                         "showing a popup changed its size from " + first + " to " + popup.ClientSize);

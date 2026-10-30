@@ -139,7 +139,7 @@ internal static class ContrastTests
             using (var center = new NotificationCenterForm(settings, entries, darkMode))
             {
                 center.CreateControl();
-                center.Show();
+                TestHelpers.ShowOffScreen(center);
                 Application.DoEvents();
                 count += Audit(center, darkMode ? "center-dark" : "center-light", problems);
             }
@@ -163,7 +163,7 @@ internal static class ContrastTests
             {
                 popup.Configure("contrast-popup", "{guid}", true, true, null, null, false, 60000);
                 popup.CreateControl();
-                popup.Show();
+                TestHelpers.ShowOffScreen(popup);
                 Application.DoEvents();
                 count += Audit(popup, darkMode ? "popup-dark" : "popup-light", problems);
             }

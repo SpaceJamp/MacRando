@@ -56,6 +56,10 @@ if (Test-Path $appIconPath) {
 if (Test-Path $licensePath) {
     $arguments += ('/resource:' + $licensePath + ',' + 'MacRando.LICENSE.txt')
 }
+$ouiPath = Join-Path $sourceFolder 'OuiDatabase.txt'
+if (Test-Path $ouiPath) {
+    $arguments += ('/resource:' + $ouiPath + ',' + 'MacRando.OuiDatabase.txt')
+}
 if ($DebugBuild) {
     $arguments += '/debug:full'
     $arguments += '/optimize-'

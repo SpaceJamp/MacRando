@@ -43,6 +43,8 @@ $sources = @(
     (Join-Path $root 'tests\ControlSweepTests.cs'),
     (Join-Path $root 'tests\PublicIpTests.cs'),
     (Join-Path $root 'tests\NotificationTests.cs'),
+    (Join-Path $root 'tests\OuiTests.cs'),
+    (Join-Path $root 'tests\TestHelpers.cs'),
     (Join-Path $root 'src\TrayContext.cs'),
     (Join-Path $root 'src\TrayMenuState.cs'),
     (Join-Path $root 'src\UpdateTrust.cs'),
@@ -58,6 +60,7 @@ $sources = @(
     (Join-Path $root 'src\StartupRegistration.cs'),
     (Join-Path $root 'tests\StartupRegistrationTests.cs'),
     (Join-Path $root 'src\NotificationDisplayPolicy.cs'),
+    (Join-Path $root 'src\OuiLookup.cs'),
     (Join-Path $root 'src\SessionEndRestore.cs'),
     (Join-Path $root 'tests\SessionEndTests.cs'),
     (Join-Path $root 'tests\ChangeFlowTests.cs')

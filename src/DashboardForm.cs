@@ -201,6 +201,7 @@ namespace MacRando
         private readonly Label _selectedStatusLabel;
         private readonly Label _currentMacLabel;
         private readonly Label _permanentMacLabel;
+        private readonly Label _currentMacVendorLabel;
         private readonly Label _networkIpLabel;
         private readonly Label _networkModeLabel;
         private readonly Label _networkLinkLabel;
@@ -364,8 +365,11 @@ namespace MacRando
             _selectedTitleLabel.Size = new Size(700, 30);
             _selectedTitleLabel.Font = new Font("Segoe UI Semibold", 16F, FontStyle.Bold, GraphicsUnit.Point);
             _selectedStatusLabel = MakeMutedLabel("Connect or enable a physical network adapter.");
-            _currentMacLabel = MakeValueLabel("—");
-            _permanentMacLabel = MakeValueLabel("—");
+            _currentMacLabel = MakeValueLabel("-");
+            _permanentMacLabel = MakeValueLabel("-");
+            // Read-only vendor lookup for the adapter's current MAC. The OUI database is
+            // bundled, so this needs no network and no consent.
+            _currentMacVendorLabel = MakeMutedLabel("Vendor: —");
             _networkIpLabel = MakeValueLabel("—");
             _networkModeLabel = MakeValueLabel("—");
             _networkLinkLabel = MakeMutedLabel("—");
@@ -1110,6 +1114,9 @@ namespace MacRando
                 "The original address is recorded so you can still get back to it.");
             Accessibility.Describe(_headerPublicIpLabel, "Public IP address", AccessibleRole.Text,
                 "The public IP address seen by websites from this machine.");
+            Accessibility.Describe(_currentMacVendorLabel, "MAC address vendor", AccessibleRole.Text,
+                "The manufacturer registered to the first three bytes of the current MAC address, " +
+                "from the bundled IEEE OUI list. Read-only; no network access is used.");
             Accessibility.Describe(_headerPublicIpLocationLabel, "Public IP location", AccessibleRole.Text,
                 "The approximate city, region, and country of the public IP address, with the " +
                 "network number. Empty until you enable \"Show public IP location\" in Safety " +
@@ -1726,8 +1733,10 @@ namespace MacRando
             AddCellLabel(macBody, "Permanent MAC", 1, 0);
             ConfigureValueCell(_currentMacLabel);
             ConfigureValueCell(_permanentMacLabel);
+            ConfigureValueCell(_currentMacVendorLabel);
             macBody.Controls.Add(_currentMacLabel, 0, 1);
             macBody.Controls.Add(_permanentMacLabel, 1, 1);
+            macBody.Controls.Add(_currentMacVendorLabel, 1, 2);
             AddCellLabel(macBody, "Manual MAC", 0, 2);
             var manualRow = CreateTwoColumnRow();
             ConfigureInputCell(_macTextBox);
@@ -1899,7 +1908,8 @@ namespace MacRando
                 _macTextBox.Clear();
                 _selectedTitleLabel.Text = "No adapter selected";
                 _selectedStatusLabel.Text = "Connect or enable a physical network adapter.";
-                _currentMacLabel.Text = "—";
+                _currentMacLabel.Text = "-";
+            _currentMacVendorLabel.Text = "Vendor: —";
                 _permanentMacLabel.Text = "—";
                 _networkIpLabel.Text = "—";
                 _networkModeLabel.Text = "—";
@@ -1950,6 +1960,7 @@ namespace MacRando
                 _selectedStatusLabel.Text + (adapter.IsChangeable ? string.Empty : "  •  " + adapter.Restriction));
             _currentMacLabel.Text = DisplayMac(adapter.MacAddress);
             _permanentMacLabel.Text = DisplayMac(adapter.PermanentMacAddress);
+            _currentMacVendorLabel.Text = "Vendor: " + OuiLookup.Lookup(adapter.MacAddress);
             _networkIpLabel.Text = string.IsNullOrWhiteSpace(adapter.IpAddress) ? "—" : adapter.IpAddress + "/" + adapter.PrefixLength;
             _networkModeLabel.Text = adapter.DhcpEnabled ? "DHCP" : "Static";
             _networkLinkLabel.Text = string.IsNullOrWhiteSpace(adapter.LinkSpeed) ? "—" : adapter.LinkSpeed;
@@ -1963,6 +1974,7 @@ namespace MacRando
             _toolTip.SetToolTip(_selectedTitleLabel, _selectedTitleLabel.Text);
             _toolTip.SetToolTip(_currentMacLabel, "Current MAC: " + _currentMacLabel.Text);
             _toolTip.SetToolTip(_permanentMacLabel, "Permanent MAC: " + _permanentMacLabel.Text);
+            _toolTip.SetToolTip(_currentMacVendorLabel, "OUI vendor for the current MAC address: " + OuiLookup.Lookup(adapter.MacAddress));
             _toolTip.SetToolTip(_networkIpLabel, "IPv4 address: " + _networkIpLabel.Text);
             _toolTip.SetToolTip(_networkModeLabel, "Mode: " + _networkModeLabel.Text);
             _toolTip.SetToolTip(_networkLinkLabel, "Link: " + _networkLinkLabel.Text);
@@ -2229,6 +2241,7 @@ namespace MacRando
             _headerPublicIpLabel.ForeColor = secondary;
             _headerPublicIpLocationLabel.ForeColor = secondary;
             _currentMacLabel.ForeColor = accent;
+            _currentMacVendorLabel.ForeColor = secondary;
             _publicIpLabel.ForeColor = accent;
             _publicIpLocationLabel.ForeColor = secondary;
             // Fonts are final by this point, which is the only moment these labels can be

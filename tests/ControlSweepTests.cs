@@ -217,7 +217,7 @@ internal static class ControlSweepTests
         using (NotificationCenterForm center = new NotificationCenterForm(settings, entries, darkMode))
         {
             center.CreateControl();
-            center.Show();
+            TestHelpers.ShowOffScreen(center);
             Settle(center);
             if (scale != 1.0f)
             {
@@ -246,7 +246,7 @@ internal static class ControlSweepTests
         {
             popup.Configure("sweep-popup", "{guid}", true, true, null, null, false, 60000);
             popup.CreateControl();
-            popup.Show();
+            TestHelpers.ShowOffScreen(popup);
             Settle(popup);
             if (scale != 1.0f)
             {

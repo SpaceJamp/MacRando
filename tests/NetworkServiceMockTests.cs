@@ -303,6 +303,11 @@ internal static class NetworkServiceMockTests
             {
                 return notificationResult;
             }
+            int ouiResult = OuiTests.Run();
+            if (ouiResult != 0)
+            {
+                return ouiResult;
+            }
             return 0;
         }
         catch (Exception error)
