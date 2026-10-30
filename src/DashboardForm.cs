@@ -121,14 +121,14 @@ namespace MacRando
         private const string PublicIpLocationOptInHint =
             "Off. Enable \"Show public IP location\" in Safety and status.";
 
-        private const string PublicIpLocationUnavailableHint =
+        internal const string PublicIpLocationUnavailableHint =
             "The location service could not be reached. Press Refresh to try again.";
 
         private const string PublicIpLocationLookingUpHint =
             "Looking up your public IP location...";
 
         /// <summary>Header variant: 220px wide, so no full sentences.</summary>
-        private const string PublicIpLocationUnavailableShort = "Location unavailable";
+        internal const string PublicIpLocationUnavailableShort = "Location unavailable";
 
         /// <summary>
         /// Used when the address itself could not be fetched. Blaming the location service
@@ -813,7 +813,7 @@ namespace MacRando
         /// first because that is what a person is actually asking for; the network operator
         /// is a detail, and in the header there is no room for it.
         /// </summary>
-        private static string DescribePublicIpPlace(NetworkIdentity identity)
+        internal static string DescribePublicIpPlace(NetworkIdentity identity)
         {
             var place = new List<string>();
             Action<string> add = delegate(string value)

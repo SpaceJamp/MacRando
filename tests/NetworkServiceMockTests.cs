@@ -293,6 +293,11 @@ internal static class NetworkServiceMockTests
             {
                 return sweepResult;
             }
+            int publicIpResult = PublicIpTests.Run();
+            if (publicIpResult != 0)
+            {
+                return publicIpResult;
+            }
             return 0;
         }
         catch (Exception error)
