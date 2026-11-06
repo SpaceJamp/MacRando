@@ -36,7 +36,7 @@ UninstallDisplayName={#AppName}
 SetupIconFile=assets\MacRando.ico
 ; No WizardImageFile: that directive wants a bitmap, not an icon, and MacRando only ships
 ; the .ico. The setup icon above is enough branding for the wizard.
-; No LicenseFile page: Inno only accepts a .txt or .rtf there, and the Apache-2.0 text is
+; No LicenseFile page: Inno only accepts a .txt or .rtf there, and the PNC-1.2 text is
 ; shipped verbatim as LICENSE in [Files] rather than duplicated into a second file that
 ; could drift from it.
 CloseApplications=yes

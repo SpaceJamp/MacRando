@@ -1,5 +1,15 @@
 # MacRando Changelog
 
+## 1.17.2 - 2026.11
+
+### Changed
+
+- **The license is now the Personal and Non-Commercial Use License (PNC-1.2), replacing Apache-2.0.** MacRando stays free for personal, non-commercial use. Using it for commercial purposes, including in the operations of a business, government body or other organization, now requires a separate written license. If you share a modified version, you must share it free of charge under the same license with its source code. The tray menu, About box, notification center footer, diagnostics and portable readme name the new license. Releases up to 1.17.1 remain available under Apache-2.0.
+
+### Tests
+
+- `license-tests` is rewritten for the new text and fails if a placeholder is left in `LICENSE`. Its check that the license ships with the build was silently skipped, because it looked for `src/build.ps1`; it now reads `build.ps1` and fails if a file is missing.
+
 ## 1.17.1 - 2026.10
 
 ### Changed

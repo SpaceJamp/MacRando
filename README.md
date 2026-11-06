@@ -432,9 +432,9 @@ The diagnostics report checks adapter discovery, the selected adapter's `Network
 
 Copyright (c) 2026 SpaceJamp
 
-MacRando is licensed under the [Apache License, Version 2.0](LICENSE). The full license text is in `LICENSE` and is also included in every release archive and installation, as required by section 4(a) of the license.
+MacRando is licensed under the [Personal and Non-Commercial Use License (PNC-1.2)](LICENSE). It is free for personal, non-commercial use, and commercial use needs a separate written license from the author. The full license text is in `LICENSE` and is also included in every release archive and installation, as required by section 5 of the license.
 
-Unless required by applicable law or agreed to in writing, the software is provided on an **AS IS** basis, without warranties or conditions of any kind. MacRando modifies live network adapter settings and requires administrator rights, so you are responsible for testing it on a network you are permitted to reconfigure and for complying with your local policies and applicable laws.
+The software is provided **AS IS**, without warranty of any kind. MacRando modifies live network adapter settings and requires administrator rights, so you are responsible for testing it on a network you are permitted to reconfigure and for complying with your local policies and applicable laws.
 
 ## Project layout
 
@@ -466,7 +466,7 @@ Unless required by applicable law or agreed to in writing, the software is provi
 - `trust-certificate.ps1` — opt-in public-certificate trust helper for the TrustedPublisher store.
 - `publish-update.ps1` — generates and verifies the `update.json` release manifest.
 - `CHANGELOG.md` — release notes and change history.
-- `LICENSE` — Apache License 2.0.
+- `LICENSE` — Personal and Non-Commercial Use License (PNC-1.2).
 - `sign.ps1` — SHA-256 Authenticode signing helper.
 - `installer.iss` — optional Inno Setup installer template.
 - `.github/workflows/ci.yml` — build and mock-test checks on every push and pull request.

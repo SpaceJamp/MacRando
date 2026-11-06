@@ -189,7 +189,7 @@ User data (settings, restore profiles, notification history, logs) is stored per
 Deleting this folder removes the application. Deleting that user-data folder removes
 settings and any pending restore profile, so restore adapters before doing so.
 
-Licensed under the Apache License, Version 2.0. See LICENSE.
+Licensed under the Personal and Non-Commercial Use License (PNC-1.2). See LICENSE.
 "@
     [System.IO.File]::WriteAllText(
         (Join-Path $portableRoot 'PORTABLE-README.txt'),
