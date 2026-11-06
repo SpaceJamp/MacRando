@@ -1,6 +1,6 @@
 # Personal and Non-Commercial Use License (PNC-1.2)
 
-Copyright (c) 2026 Jeffrey Horne
+Copyright (c) 2026 SpaceJamp
 
 All rights not expressly granted in this license are reserved by the Author.
 
@@ -9,7 +9,7 @@ All rights not expressly granted in this license are reserved by the Author.
 For purposes of this license:
 
 - "Software" means the original program in source or compiled form, together with its documentation, assets, and associated files, as distributed by the Author under this license, and any portion of any of them.
-- "Author" means Jeffrey Horne, the original copyright holder, and the Author's heirs, successors, and assigns.
+- "Author" means SpaceJamp, the original copyright holder, and the Author's heirs, successors, and assigns.
 - "You" means the individual exercising rights under this license. You may not exercise these rights on behalf of, or for the benefit of, any employer, client, or organization.
 - "Modified Version" means any work that changes, adapts, translates, extends, or is derived from the Software, in whole or in part, to the extent that work would require the Author's permission under copyright law.
 - "Distribute" means to make the Software or a Modified Version available to any other person by any means, including hosting, uploading, publishing, streaming, or transferring copies. Use only on your own devices, with no copy made available to anyone else, is not distribution.
@@ -73,7 +73,7 @@ Any permitted distribution of the Software or a Modified Version must include:
 
 - The original copyright notice.
 - A complete copy of this license.
-- A credit to the Author in a reasonably visible location, such as a README file, credits screen, or "About" section, in substantially this form: "Based on software by Jeffrey Horne, licensed under PNC-1.2."
+- A credit to the Author in a reasonably visible location, such as a README file, credits screen, or "About" section, in substantially this form: "Based on software by SpaceJamp, licensed under PNC-1.2."
 - A clear statement identifying any modifications made.
 
 You may not claim authorship of the Software or remove or alter the Author's credit.
@@ -153,5 +153,5 @@ You are not required to accept this license. However, nothing else grants You pe
 
 For commercial licensing, permission requests, and notices, contact:
 
-Jeffrey Horne
+SpaceJamp
 Email: SpaceJampGithub@proton.me
