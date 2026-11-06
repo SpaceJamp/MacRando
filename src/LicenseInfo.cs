@@ -10,7 +10,7 @@ namespace MacRando
         public const string ShortName = "PNC-1.2";
         public const string Name = "Personal and Non-Commercial Use License";
         public const string Url = "https://github.com/SpaceJamp/MacRando/blob/main/LICENSE";
-        public const string Copyright = "Copyright (c) 2026 Jeffrey Horne";
+        public const string Copyright = "Copyright (c) 2026 SpaceJamp";
         public const string ResourceName = "MacRando.LICENSE.txt";
 
         public static string Notice
@@ -28,7 +28,7 @@ namespace MacRando
                     "You may use and modify this software for personal, non-commercial purposes, and " +
                     "share it free of charge under the same license with attribution. If you share a " +
                     "modified version, you must also provide its source code. Any commercial use, " +
-                    "including use by a business, school, nonprofit, or government body, requires a " +
+                    "including use by a business, government body, or other organization, requires a " +
                     "separate written license from the author." + Environment.NewLine +
                     Environment.NewLine +
                     "This software is provided AS IS, without warranty of any kind. " +

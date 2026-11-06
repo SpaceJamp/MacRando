@@ -430,7 +430,7 @@ The diagnostics report checks adapter discovery, the selected adapter's `Network
 
 ## License
 
-Copyright (c) 2026 Jeffrey Horne
+Copyright (c) 2026 SpaceJamp
 
 MacRando is licensed under the [Personal and Non-Commercial Use License (PNC-1.2)](LICENSE). It is free for personal, non-commercial use, and commercial use needs a separate written license from the author. The full license text is in `LICENSE` and is also included in every release archive and installation, as required by section 5 of the license.
 

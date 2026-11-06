@@ -114,7 +114,7 @@ internal static class LicenseTests
             "Any Commercial Use requires a separate written license from the Author.",
             "Make the complete Source Code of the Modified Version available to every recipient",
             "License the Modified Version under this same license",
-            "Based on software by Jeffrey Horne, licensed under PNC-1.2.",
+            "Based on software by SpaceJamp, licensed under PNC-1.2.",
             "THE SOFTWARE IS PROVIDED \"AS IS\" AND \"AS AVAILABLE\", WITHOUT WARRANTY OF ANY KIND",
             "IN NO EVENT SHALL THE AUTHOR BE LIABLE"
         };
