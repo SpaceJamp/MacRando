@@ -2710,7 +2710,7 @@ namespace MacRando
                 lines.Add("MacRando diagnostic bundle");
                 lines.Add("Generated (UTC): " + DateTime.UtcNow.ToString("o"));
                 lines.Add("Version: " + AppInfo.DisplayVersion);
-                lines.Add("License: " + LicenseInfo.SpdxId);
+                lines.Add("License: " + LicenseInfo.ShortName);
                 lines.Add("Elevated: " + (IsElevated() ? "Yes" : "No"));
                 if (_restoreStateUnreadable)
                 {
@@ -3253,7 +3253,7 @@ namespace MacRando
             ToolStripMenuItem about = new ToolStripMenuItem("About MacRando");
             about.Click += (sender, args) => ShowAbout();
 
-            ToolStripMenuItem license = new ToolStripMenuItem("License (" + LicenseInfo.SpdxId + ")");
+            ToolStripMenuItem license = new ToolStripMenuItem("License (" + LicenseInfo.ShortName + ")");
             license.Click += (sender, args) => ShowLicense();
 
             _restoreProblemMenuItem = new ToolStripMenuItem("Restore data problem...");
@@ -4030,7 +4030,7 @@ namespace MacRando
 
         private void ShowLicense()
         {
-            ShowReadOnlyReport("MacRando license - " + LicenseInfo.SpdxId, LicenseInfo.GetDisplayText(), "Copy license");
+            ShowReadOnlyReport("MacRando license - " + LicenseInfo.ShortName, LicenseInfo.GetDisplayText(), "Copy license");
         }
 
         private async Task ExitApplicationAsync()

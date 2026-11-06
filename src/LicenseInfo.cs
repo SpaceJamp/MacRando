@@ -7,15 +7,15 @@ namespace MacRando
 {
     internal static class LicenseInfo
     {
-        public const string SpdxId = "Apache-2.0";
-        public const string Name = "Apache License, Version 2.0";
-        public const string Url = "https://www.apache.org/licenses/LICENSE-2.0";
-        public const string Copyright = "Copyright (c) 2026 SpaceJamp";
+        public const string ShortName = "PNC-1.2";
+        public const string Name = "Personal and Non-Commercial Use License";
+        public const string Url = "https://github.com/SpaceJamp/MacRando/blob/main/LICENSE";
+        public const string Copyright = "Copyright (c) 2026 Jeffrey Horne";
         public const string ResourceName = "MacRando.LICENSE.txt";
 
         public static string Notice
         {
-            get { return Copyright + "  •  License: " + SpdxId; }
+            get { return Copyright + "  •  License: " + ShortName; }
         }
 
         public static string Summary
@@ -23,14 +23,16 @@ namespace MacRando
             get
             {
                 return Copyright + Environment.NewLine +
-                    "Licensed under the " + Name + " (" + SpdxId + ")." + Environment.NewLine +
+                    "Licensed under the " + Name + " (" + ShortName + ")." + Environment.NewLine +
                     Environment.NewLine +
-                    "You may use, modify, and redistribute this software, including in larger works, " +
-                    "provided that recipients receive a copy of the license, modified files carry " +
-                    "prominent change notices, and existing attribution notices are retained." + Environment.NewLine +
+                    "You may use and modify this software for personal, non-commercial purposes, and " +
+                    "share it free of charge under the same license with attribution. If you share a " +
+                    "modified version, you must also provide its source code. Any commercial use, " +
+                    "including use by a business, school, nonprofit, or government body, requires a " +
+                    "separate written license from the author." + Environment.NewLine +
                     Environment.NewLine +
-                    "This software is provided on an AS IS basis, without warranties or conditions " +
-                    "of any kind. MacRando changes live network adapter settings and requires " +
+                    "This software is provided AS IS, without warranty of any kind. " +
+                    "MacRando changes live network adapter settings and requires " +
                     "administrator rights, so you are responsible for testing it on a network you " +
                     "are permitted to reconfigure and for complying with applicable laws and policies." + Environment.NewLine +
                     Environment.NewLine +
@@ -73,7 +75,7 @@ namespace MacRando
                 return Summary;
             }
             return Copyright + Environment.NewLine +
-                "Licensed under the " + Name + " (" + SpdxId + ")." +
+                "Licensed under the " + Name + " (" + ShortName + ")." +
                 Environment.NewLine + Environment.NewLine +
                 "Full license text:" + Environment.NewLine + Environment.NewLine +
                 full;

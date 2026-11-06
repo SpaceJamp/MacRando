@@ -6,15 +6,10 @@ using System.Text.RegularExpressions;
 /// <summary>
 /// Guards the LICENSE file against being edited by accident.
 ///
-/// The terms were verified line by line against the canonical Apache-2.0 text: 200 of the
-/// 201 lines are byte-identical, and the only difference is the copyright line. That is
-/// the correct state, and it is also a state nothing else in this project would protect.
 /// A stray edit to a licence is a legal problem, not a build failure, and it is invisible
-/// in a diff of a 200-line wall of legal text unless someone reads it closely.
-///
-/// So the check is deliberately paranoid about the terms and tolerant about formatting:
-/// the required clauses must all be present, and the only line permitted to differ from
-/// the stock text is the copyright notice.
+/// in a diff of a wall of legal text unless someone reads it closely. So the sections and
+/// the clauses that carry real obligations must all be present, and the copyright, which
+/// is stated in several places that are edited separately, must agree.
 /// </summary>
 internal static class LicenseTests
 {
@@ -24,9 +19,8 @@ internal static class LicenseTests
     {
         try
         {
-            TheCopyrightLineFollowsTheTemplate();
             EverySectionIsPresent();
-            TheTermsAreTheStockWording();
+            TheKeyTermsAreIntact();
             TheNoticesAgreeWithEachOther();
             TheFullTextIsShipped();
             Console.WriteLine("license-tests=OK;checks=" + _checks);
@@ -64,37 +58,6 @@ internal static class LicenseTests
         return File.Exists(path) ? File.ReadAllText(path, Encoding.UTF8) : null;
     }
 
-    /// <summary>
-    /// The appendix says to replace the bracketed fields and, in those words, not to
-    /// include the brackets. Leaving them in is a deviation from the template the licence
-    /// itself specifies, and it is the one deviation that was present.
-    /// </summary>
-    private static void TheCopyrightLineFollowsTheTemplate()
-    {
-        string license = ReadFile("LICENSE");
-        if (license == null)
-        {
-            return;
-        }
-
-        Match line = Regex.Match(license, @"(?m)^\s*Copyright\s+(.+?)\s*$");
-        Check(line.Success, "The LICENSE file has no copyright line in its appendix.");
-        string notice = line.Groups[1].Value;
-
-        Check(notice.IndexOf('[') < 0 && notice.IndexOf(']') < 0,
-            "The copyright line still contains brackets: '" + notice + "'. The Apache-2.0 appendix " +
-            "says to replace the bracketed fields and not to include the brackets.");
-
-        // A year and a holder, in the order the template uses.
-        Check(Regex.IsMatch(notice, @"^\d{4}\s+\S.*$"),
-            "The copyright line should read as a year followed by the copyright holder, but is: '" + notice + "'");
-
-        // The placeholder must not have survived in any form.
-        Check(notice.IndexOf("yyyy", StringComparison.OrdinalIgnoreCase) < 0
-              && notice.IndexOf("name of copyright owner", StringComparison.OrdinalIgnoreCase) < 0,
-            "The copyright line still contains the template placeholder: '" + notice + "'");
-    }
-
     private static void EverySectionIsPresent()
     {
         string license = ReadFile("LICENSE");
@@ -103,37 +66,41 @@ internal static class LicenseTests
             return;
         }
 
-        // The nine numbered sections plus the two markers. If any were removed or renamed
-        // the licence would no longer be Apache-2.0, whatever the file is called.
         string[] required =
         {
-            "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION",
-            "1. Definitions.",
-            "2. Grant of Copyright License.",
-            "3. Grant of Patent License.",
-            "4. Redistribution.",
-            "5. Submission of Contributions.",
-            "6. Trademarks.",
-            "7. Disclaimer of Warranty.",
-            "8. Limitation of Liability.",
-            "9. Accepting Warranty or Additional Liability.",
-            "END OF TERMS AND CONDITIONS",
-            "APPENDIX: How to apply the Apache License to your work."
+            "# Personal and Non-Commercial Use License (PNC-1.2)",
+            "## 1. Definitions and Interpretation",
+            "## 2. License Grant",
+            "## 3. Noncommercial Restrictions",
+            "## 4. Source Code and Modified Versions",
+            "## 5. Attribution",
+            "## 6. Names, Trademarks, and Endorsement",
+            "## 7. Contributions to the Author",
+            "## 8. Termination",
+            "## 9. Remedies",
+            "## 10. Indemnification",
+            "## 11. Disclaimer of Warranty",
+            "## 12. Limitation of Liability",
+            "## 13. Ownership and No Implied Rights",
+            "## 14. Changes to This License",
+            "## 15. Rights Under Applicable Law",
+            "## 16. Notices",
+            "## 17. General Terms",
+            "## 18. Acceptance"
         };
         foreach (string heading in required)
         {
             Check(license.IndexOf(heading, StringComparison.Ordinal) >= 0,
-                "The LICENSE file is missing '" + heading + "'. The terms must be the unmodified " +
-                "Apache-2.0 text, not a summary or a partial copy.");
+                "The LICENSE file is missing '" + heading + "'. The terms must be the complete " +
+                "PNC-1.2 text, not a summary or a partial copy.");
         }
     }
 
     /// <summary>
-    /// Spot-checks clauses that carry real obligations, chosen because they are the ones a
-    /// careless edit would most plausibly change, and because dropping any of them would
-    /// alter what a recipient is actually agreeing to.
+    /// Spot-checks the clauses a careless edit would most plausibly change, and whose loss
+    /// would alter what a recipient is agreeing to.
     /// </summary>
-    private static void TheTermsAreTheStockWording()
+    private static void TheKeyTermsAreIntact()
     {
         string license = ReadFile("LICENSE");
         if (license == null)
@@ -141,42 +108,28 @@ internal static class LicenseTests
             return;
         }
 
-        // Each clause is quoted exactly as the licence wraps it. Written from memory
-        // instead, they do not match: the text is hard-wrapped, so a phrase that reads as
-        // one sentence on the page is split across two lines in the file. That mistake was
-        // made while writing this test and it failed against a licence that is correct.
         string[] clauses =
         {
-            "\"License\" shall mean the terms and conditions for use, reproduction,",
-            "worldwide, non-exclusive, no-charge, royalty-free, irrevocable",
-            "You must give any other recipients of the Work or",
-            "You must cause any modified files to carry prominent notices",
-            "WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or",
-            "shall any Contributor be",
-            "distributed under the License is distributed on an \"AS IS\" BASIS",
-            "http://www.apache.org/licenses/LICENSE-2.0"
+            "Use the Software for any Commercial Use.",
+            "Any Commercial Use requires a separate written license from the Author.",
+            "Make the complete Source Code of the Modified Version available to every recipient",
+            "License the Modified Version under this same license",
+            "Based on software by Jeffrey Horne, licensed under PNC-1.2.",
+            "THE SOFTWARE IS PROVIDED \"AS IS\" AND \"AS AVAILABLE\", WITHOUT WARRANTY OF ANY KIND",
+            "IN NO EVENT SHALL THE AUTHOR BE LIABLE"
         };
         foreach (string clause in clauses)
         {
             Check(license.IndexOf(clause, StringComparison.Ordinal) >= 0,
-                "The LICENSE file is missing or has altered this clause: '" + clause + "'. " +
-                "The terms must be the unmodified Apache-2.0 text.");
+                "The LICENSE file is missing or has altered this clause: '" + clause + "'.");
         }
 
-        // The disclaimer of warranty and the limitation of liability are the two clauses
-        // that matter most to a licensor, so they are called out by name in the failure
-        // message rather than only being part of a loop. Quoted exactly as written, which
-        // for the warranty disclaimer means including the quotation marks around AS IS.
-        Check(license.IndexOf("\"AS IS\" BASIS", StringComparison.Ordinal) >= 0,
-            "The LICENSE file no longer disclaims warranty. That clause must not be removed.");
-        Check(license.IndexOf("8. Limitation of Liability.", StringComparison.Ordinal) >= 0,
-            "The LICENSE file no longer limits liability. That section must not be removed.");
+        Check(license.IndexOf('[') < 0, "The LICENSE file still has an unfilled [placeholder].");
     }
 
     /// <summary>
-    /// The copyright is stated in three places, and they are edited separately. A
-    /// mismatch is not fatal but it is the kind of thing that makes a licence look
-    /// careless, and the year in particular should not drift between them.
+    /// The copyright is stated in several places, and they are edited separately. A
+    /// mismatch makes a licence look careless, and the year should not drift between them.
     /// </summary>
     private static void TheNoticesAgreeWithEachOther()
     {
@@ -187,37 +140,38 @@ internal static class LicenseTests
             return;
         }
 
-        Match inLicense = Regex.Match(license, @"(?m)^\s*Copyright\s+(\d{4})\s+(.+?)\s*$");
-        Check(inLicense.Success, "The LICENSE file has no 'Copyright <year> <holder>' line.");
-        string year = inLicense.Groups[1].Value;
-        string holder = inLicense.Groups[2].Value;
+        Match inLicense = Regex.Match(license, @"(?m)^Copyright \(c\) (\d{4}) (.+?)\s*$");
+        Check(inLicense.Success, "The LICENSE file has no 'Copyright (c) <year> <holder>' line.");
+        string notice = "Copyright (c) " + inLicense.Groups[1].Value + " " + inLicense.Groups[2].Value;
 
-        Match inReadme = Regex.Match(readme, @"Copyright \(c\)\s+(\d{4})\s+(.+?)\s*$", RegexOptions.Multiline);
-        Check(inReadme.Success, "README.md has no 'Copyright (c) <year> <holder>' line.");
-        Check(inReadme.Groups[1].Value == year,
-            "The copyright year differs: LICENSE says " + year + " and README says " + inReadme.Groups[1].Value);
-        Check(string.Equals(inReadme.Groups[2].Value, holder, StringComparison.OrdinalIgnoreCase),
-            "The copyright holder differs: LICENSE says '" + holder + "' and README says '" +
-            inReadme.Groups[2].Value + "'");
+        Check(MacRando.LicenseInfo.Copyright == notice,
+            "The copyright differs: LICENSE says '" + notice + "' and the application says '" +
+            MacRando.LicenseInfo.Copyright + "'");
+        Check(readme.IndexOf(notice, StringComparison.Ordinal) >= 0,
+            "README.md does not carry the LICENSE copyright line: '" + notice + "'");
+        Check(readme.IndexOf(MacRando.LicenseInfo.ShortName, StringComparison.Ordinal) >= 0,
+            "README.md does not name the license " + MacRando.LicenseInfo.ShortName);
     }
 
     /// <summary>
-    /// Section 4(a) requires that recipients receive a copy of the licence, so it has to
-    /// actually travel with the software. Checked in the three places it must appear.
+    /// Section 5 requires a complete copy of the licence with any distribution, so it has
+    /// to travel with the software. Checked in the three places it must appear.
     /// </summary>
     private static void TheFullTextIsShipped()
     {
         string installer = ReadFile("installer.iss");
         string package = ReadFile("package.ps1");
-        string build = ReadFile(Path.Combine("src", "build.ps1"));
-        if (installer == null || package == null || build == null)
+        string build = ReadFile("build.ps1");
+        if (RepositoryRoot() == null)
         {
             return;
         }
+        Check(installer != null && package != null && build != null,
+            "installer.iss, package.ps1 and build.ps1 must all exist to check the licence ships.");
 
         Check(Regex.IsMatch(installer, @"(?m)^Source:\s*""LICENSE"""),
-            "installer.iss no longer installs the LICENSE file. Section 4(a) of the licence " +
-            "requires recipients to receive a copy of it.");
+            "installer.iss no longer installs the LICENSE file. Section 5 of the licence " +
+            "requires a complete copy with any distribution.");
         Check(package.IndexOf("'LICENSE'", StringComparison.Ordinal) >= 0,
             "package.ps1 no longer includes LICENSE in the release archive, so a user who " +
             "downloads the ZIP would not receive the licence text.");
