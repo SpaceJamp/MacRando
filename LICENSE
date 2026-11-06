@@ -18,7 +18,7 @@ For purposes of this license:
 - "Commercial Use" means any use intended for or directed toward commercial advantage or monetary compensation, whether direct or indirect, including:
   (a) selling, renting, leasing, licensing, or charging fees for the Software or any Modified Version;
   (b) using the Software in, or to support, any product or service offered for payment;
-  (c) using the Software in the operations of any business, government body, school, nonprofit, or other organization;
+  (c) using the Software in the operations of any business, government body, or other organization;
   (d) using the Software to generate revenue, including through paid access, subscriptions, advertising You control, sponsorships, donations or tips tied to access or features, in-app purchases, or the sale of any digital goods or services; and
   (e) performing paid work, freelance work, or commissions that use or deliver the Software or any Modified Version.
 - "Written" or "in writing" means a document signed by the Author, or an email sent by the Author from the address listed in the Contact section, that expressly refers to this license and grants the permission in question. Silence, inaction, or informal comments are not written permission.
@@ -138,7 +138,7 @@ The Author may give You notice under this license by email to any address You ha
 
 ## 17. General Terms
 
-- Governing Law. This license is governed by the laws of the State of Florida, United States, and applicable U.S. federal law, without regard to conflict-of-laws rules. Any dispute shall be brought exclusively in the state or federal courts located in Lake County, Florida, and You consent to the personal jurisdiction of those courts.
+- Governing Law. This license is governed by the laws of the State of [STATE], United States, and applicable U.S. federal law, without regard to conflict-of-laws rules. Any dispute shall be brought exclusively in the state or federal courts located in [COUNTY, STATE], and You consent to the personal jurisdiction of those courts.
 - Severability. If any provision of this license is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions remain in full effect.
 - No Waiver. The Author's failure or delay in enforcing any provision is not a waiver of the right to enforce it later, against You or anyone else.
 - Assignment. You may not assign or transfer this license. The Author may assign this license and any rights under it.
@@ -154,4 +154,4 @@ You are not required to accept this license. However, nothing else grants You pe
 For commercial licensing, permission requests, and notices, contact:
 
 SpaceJamp
-Email: SpaceJampGithub@proton.me
+Email: [INSERT EMAIL ADDRESS]
