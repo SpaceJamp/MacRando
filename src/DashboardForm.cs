@@ -1329,8 +1329,10 @@ namespace MacRando
             };
             // The selected adapter's name and status, then the public IP and Refresh. The
             // app title moved to the top of the adapter list.
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
+            // Shares, not a fixed 220px IP column: in a narrow window at 200% the fixed
+            // column took the whole width and squeezed the adapter name to 1px under it.
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             var titleLayout = new TableLayoutPanel

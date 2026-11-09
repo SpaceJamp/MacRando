@@ -42,6 +42,7 @@ internal static class LayoutTests
             CenterNothingOverlaps();
             ALongStatusShowsTwoLines();
             ActionGridsFitWiderText();
+            PagesFitASmallScreenAtHighScaling();
             NothingOverlapsAtAnySize();
             NoLabelIsShorterThanItsText();
             NoControlIsClippedAtAnySize();
@@ -852,6 +853,62 @@ internal static class LayoutTests
                 Check(problems.Count == 0,
                     "an action button wider than its minimum size overlaps its neighbour: " +
                     (problems.Count == 0 ? "" : problems[0]));
+            }
+        });
+    }
+
+    /// <summary>
+    /// Windows caps a window at the screen's size, so on a small screen a highly scaled
+    /// dashboard gets big fonts in a small window. CI's runner (a 1024x768 screen) showed
+    /// overlaps that a large desktop never does; the cap is applied here with MaximumSize
+    /// so the case runs everywhere.
+    /// </summary>
+    private static void PagesFitASmallScreenAtHighScaling()
+    {
+        RunOnUiThread(delegate
+        {
+            foreach (float scale in new[] { 1.5f, 2.0f })
+            {
+                using (DashboardForm form = new DashboardForm())
+                {
+                    Populate(form);
+                    form.Size = new Size(900, 620);
+                    Settle(form);
+                    form.Scale(new SizeF(scale, scale));
+                    form.MinimumSize = Size.Empty;
+                    form.MaximumSize = new Size(1024, 768);
+                    Settle(form);
+                    PivotBar pivot = DashboardPivot(form);
+                    for (int page = 0; page < pivot.TabCount; page++)
+                    {
+                        pivot.SelectedIndex = page;
+                        Settle(form);
+                        List<string> problems = FindOverlaps(form);
+                        Check(problems.Count == 0,
+                            "overlap on the \"" + DashboardPages[page] + "\" page in a 1024x768 window scaled " + scale +
+                            "x: " + (problems.Count == 0 ? "" : problems[0]));
+                    }
+                }
+                using (var center = new NotificationCenterForm(new AppSettings(), new List<NotificationHistoryEntry>(), false))
+                {
+                    center.Size = new Size(760, 500);
+                    Settle(center);
+                    center.Scale(new SizeF(scale, scale));
+                    center.MinimumSize = Size.Empty;
+                    center.MaximumSize = new Size(1024, 768);
+                    Settle(center);
+                    PivotBar pivot = (PivotBar)typeof(NotificationCenterForm)
+                        .GetField("_pivot", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(center);
+                    for (int page = 0; page < pivot.TabCount; page++)
+                    {
+                        pivot.SelectedIndex = page;
+                        Settle(center);
+                        List<string> problems = FindOverlaps(center);
+                        Check(problems.Count == 0,
+                            "notification center overlap on the \"" + pivot.TabButton(page).Text + "\" tab in a 1024x768 window scaled " +
+                            scale + "x: " + (problems.Count == 0 ? "" : problems[0]));
+                    }
+                }
             }
         });
     }
