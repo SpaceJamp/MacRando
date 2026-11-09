@@ -1,5 +1,28 @@
 # MacRando Changelog
 
+## 1.18.0 - 2026.11
+
+### Changed
+
+- **New Windows 11 Fluent look** for the dashboard, notification center, popups and tray menu. Network behaviour is unchanged. High contrast still overrides light and dark.
+  - Dashboard: the adapter list on the left and five tabs on the right (MAC address, Local network, Public IP and VPN, Adapter details, Safety and settings), with a status line on every tab. The pending-change banner is now an info bar.
+  - Notification center: History and Preferences tabs, with the selected entry's actions in a row under the list.
+  - Popups: a severity glyph, and the primary action comes first.
+  - Tray menu: taller rows with a rounded highlight, shrunk to fit the screen's work area.
+  - Windows get a dark title bar and rounded corners.
+- **Dark mode is the default** when no theme is saved. A saved "light" choice is kept.
+
+### Fixed
+
+- "Star selected" raised the wrong event check and could do nothing.
+- Notification center spinners were scattered across the Preferences page at 150% scaling.
+- In high contrast, the selected adapter row uses the system Highlight colours again.
+
+### Tests
+
+- Layout, overlap, clipping and control-sweep checks run on every tab of both windows, including small screens at 2x.
+- New tests cover the theme palette's contrast, every dashboard and notification center action, Tab order out of the tab strip, and the tray menu fitting a 688 px work area.
+
 ## 1.17.2 - 2026.11
 
 ### Changed
