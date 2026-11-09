@@ -35,17 +35,14 @@ namespace MacRando
                 Reflow();
             }
 
+            // Columns are equal width, so every control must fit one column's share; a row
+            // whose total fitted still let one wide button run over its neighbour.
             private bool Fits(int columns, int available)
             {
-                for (int start = 0; start < _controls.Count; start += columns)
+                int cell = available / columns;
+                foreach (Control control in _controls)
                 {
-                    int required = 0;
-                    int end = Math.Min(start + columns, _controls.Count);
-                    for (int index = start; index < end; index++)
-                    {
-                        required += _controls[index].MinimumSize.Width + 8;
-                    }
-                    if (required > available)
+                    if (control.MinimumSize.Width + 8 > cell)
                     {
                         return false;
                     }

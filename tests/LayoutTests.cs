@@ -41,6 +41,7 @@ internal static class LayoutTests
             DisabledPrimaryButtonsAreNotAccentFilled();
             CenterNothingOverlaps();
             ALongStatusShowsTwoLines();
+            ActionGridsFitWiderText();
             NothingOverlapsAtAnySize();
             NoLabelIsShorterThanItsText();
             NoControlIsClippedAtAnySize();
@@ -820,6 +821,37 @@ internal static class LayoutTests
                 int line = TextRenderer.MeasureText("Ag", status.Font).Height;
                 Check(status.Height >= 2 * line,
                     "the status line is " + status.Height + "px, two lines of its text need " + (2 * line) + "px");
+            }
+        });
+    }
+
+    /// <summary>
+    /// On CI "Randomize local IP" (255px minimum at 1.5x) got a 234px cell and ran over
+    /// "Apply DNS": the action grid checked that each row's total fitted, but its columns
+    /// are equal width, so one wide button overflows its own cell. Forced here with a wide
+    /// minimum size.
+    /// </summary>
+    private static void ActionGridsFitWiderText()
+    {
+        RunOnUiThread(delegate
+        {
+            using (DashboardForm form = new DashboardForm())
+            {
+                Populate(form);
+                Button randomizeIp = (Button)DashboardField(form, "_randomizeIpButton");
+                // Columns are equal width, so one wide button must drop the grid to fewer
+                // columns even when its row's total would fit.
+                randomizeIp.MinimumSize = new Size(300, randomizeIp.MinimumSize.Height);
+                form.Size = new Size(900, 620);
+                Settle(form);
+                form.Scale(new SizeF(1.5f, 1.5f));
+                Settle(form);
+                DashboardPivot(form).SelectedIndex = 1;
+                Settle(form);
+                List<string> problems = FindOverlaps(form);
+                Check(problems.Count == 0,
+                    "an action button wider than its minimum size overlaps its neighbour: " +
+                    (problems.Count == 0 ? "" : problems[0]));
             }
         });
     }
