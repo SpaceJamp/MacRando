@@ -1,5 +1,11 @@
 # MacRando Changelog
 
+## 1.18.1 - 2026.11
+
+### Fixed
+
+- **Dark mode text boxes were hard to read.** They were filled with the window background, which looked black inside the cards. They now use a lighter fill, a step above the card they sit on.
+
 ## 1.18.0 - 2026.11
 
 ### Changed
