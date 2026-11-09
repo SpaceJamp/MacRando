@@ -16,6 +16,7 @@ internal static class FluentThemeTests
         {
             TokensMatchTheSpec();
             TextIsReadable();
+            DarkInputsAreLighterThanCards();
             HighContrastIsSystemDerived();
             AccessibilityAndTrayFollowFluent();
             DarkIsTheDefaultTheme();
@@ -73,12 +74,45 @@ internal static class FluentThemeTests
         foreach (bool dark in new[] { false, true })
         {
             FluentPalette p = FluentPalette.Build(false, dark);
-            foreach (Color back in new[] { p.Background, p.Layer, p.Card, p.Selected, p.InfoBackground })
+            foreach (Color back in new[] { p.Background, p.Layer, p.Card, p.Selected, p.InfoBackground, p.Input })
             {
                 Check(Ratio(p.Text, back) >= 4.5, "text on " + back + " dark=" + dark);
                 Check(Ratio(p.TextSecondary, back) >= 4.5, "secondary on " + back + " dark=" + dark);
             }
             Check(Ratio(p.TextOnAccent, p.Accent) >= 4.5, "text on accent dark=" + dark);
+        }
+    }
+
+    /// <summary>
+    /// Dark text boxes were filled with the window background, which read as black holes
+    /// in the cards and were hard to read. A dark input is a step lighter than its card.
+    /// </summary>
+    private static void DarkInputsAreLighterThanCards()
+    {
+        FluentPalette dark = FluentPalette.Build(false, true);
+        Check(Luminance(dark.Input) > Luminance(dark.Card),
+            "a dark text box (" + dark.Input + ") should be lighter than its card (" + dark.Card + ")");
+        FluentPalette light = FluentPalette.Build(false, false);
+        Check(light.Input.ToArgb() == Color.White.ToArgb(), "a light text box stays white");
+        using (DashboardForm form = new DashboardForm())
+        {
+            ((CheckBox)DashField(form, "_darkModeCheckBox")).Checked = true;
+            if (!SystemInformation.HighContrast)
+            {
+                TextBox mac = (TextBox)DashField(form, "_macTextBox");
+                Check(mac.BackColor.ToArgb() == dark.Input.ToArgb(),
+                    "the dashboard's dark text boxes should use the input colour, is " + mac.BackColor);
+            }
+        }
+        using (var center = new NotificationCenterForm(new AppSettings(), new List<NotificationHistoryEntry>(), true))
+        {
+            if (!SystemInformation.HighContrast)
+            {
+                TextBox search = (TextBox)typeof(NotificationCenterForm)
+                    .GetField("_searchBox", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(center);
+                Check(search.BackColor.ToArgb() == dark.Input.ToArgb(),
+                    "the notification center's dark text boxes should use the input colour, is " + search.BackColor);
+            }
         }
     }
 

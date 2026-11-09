@@ -23,6 +23,7 @@ namespace MacRando
         public Color Accent { get; private set; }
         public Color TextOnAccent { get; private set; }
         public Color Selected { get; private set; }
+        public Color Input { get; private set; }
         public Color InfoBackground { get; private set; }
         public Color Success { get; private set; }
         public Color Warning { get; private set; }
@@ -47,6 +48,7 @@ namespace MacRando
                     Accent = h.Accent,
                     TextOnAccent = h.TextOnAccent,
                     Selected = h.SurfaceAlt,
+                    Input = h.Surface,
                     InfoBackground = h.Surface,
                     Success = h.Text,
                     Warning = h.Text,
@@ -68,6 +70,7 @@ namespace MacRando
                     Accent = Rgb(0x60, 0xCD, 0xFF),
                     TextOnAccent = Rgb(0, 0, 0),
                     Selected = Rgb(0x38, 0x38, 0x38),
+                    Input = Rgb(0x38, 0x38, 0x38),
                     InfoBackground = Rgb(0x43, 0x35, 0x19),
                     Success = Rgb(0x6C, 0xCB, 0x5F),
                     Warning = Rgb(0xFC, 0xE1, 0x00),
@@ -87,6 +90,7 @@ namespace MacRando
                 Accent = Rgb(0x00, 0x5F, 0xB8),
                 TextOnAccent = Color.White,
                 Selected = Rgb(0xE6, 0xE6, 0xE6),
+                Input = Color.White,
                 InfoBackground = Rgb(0xFF, 0xF4, 0xCE),
                 Success = Rgb(0x0F, 0x7B, 0x0F),
                 Warning = Rgb(0x9D, 0x5D, 0x00),

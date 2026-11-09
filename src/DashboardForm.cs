@@ -2479,7 +2479,7 @@ namespace MacRando
             // them from Accessibility.BuildPalette), and muted text is full-contrast text.
             Color background = p.Background;
             Color layer = p.Layer;
-            Color input = dark && !highContrast ? p.Background : p.Card;
+            Color input = p.Input;
             Color text = p.Text;
             Color secondary = p.TextSecondary;
             Color accent = p.Accent;

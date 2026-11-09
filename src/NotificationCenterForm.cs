@@ -844,8 +844,8 @@ namespace MacRando
             // is that the user cannot read a subtle one.
             bool highContrast = Accessibility.ShouldUseHighContrast();
             FluentPalette p = FluentPalette.Build(highContrast, darkMode);
-            // Inputs sit slightly recessed in dark mode, on white in light mode.
-            Color input = darkMode ? p.Background : p.Card;
+            // Inputs are a step lighter than their card in dark mode; recessed black was hard to read.
+            Color input = p.Input;
             foreach (Control control in parent.Controls)
             {
                 if (control is PivotBar)
