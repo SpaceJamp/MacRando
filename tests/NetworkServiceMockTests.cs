@@ -243,6 +243,11 @@ internal static class NetworkServiceMockTests
             {
                 return layoutResult;
             }
+            int fluentThemeResult = FluentThemeTests.Run();
+            if (fluentThemeResult != 0)
+            {
+                return fluentThemeResult;
+            }
             int updateTrustResult = UpdateTrustTests.Run();
             if (updateTrustResult != 0)
             {

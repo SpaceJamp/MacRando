@@ -37,6 +37,8 @@ $sources = @(
     (Join-Path $root 'tests\DeviceTrackingTests.cs'),
     (Join-Path $root 'src\RetentionPolicy.cs'),
     (Join-Path $root 'tests\RetentionTests.cs'),
+    (Join-Path $root 'src\FluentTheme.cs'),
+    (Join-Path $root 'tests\FluentThemeTests.cs'),
     (Join-Path $root 'src\Accessibility.cs'),
     (Join-Path $root 'tests\AccessibilityTests.cs'),
     (Join-Path $root 'tests\LayoutTests.cs'),

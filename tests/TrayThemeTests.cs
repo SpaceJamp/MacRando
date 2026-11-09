@@ -31,6 +31,9 @@ internal static class TrayThemeTests
             StatusColoursAreReadableInBothModes();
             HighContrastOverridesThePreference();
             TheStatusLineNeverInheritsASystemColour();
+            ItemsUseFluentHeight();
+            TheHighlightIsInsetAndRounded();
+            TheMenuFitsTheWorkArea();
             Console.WriteLine("tray-theme-tests=OK;checks=" + _checks);
             return 0;
         }
@@ -109,6 +112,101 @@ internal static class TrayThemeTests
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Exit"));
         return menu;
+    }
+
+    /// <summary>
+    /// Fluent menu rows are 30px tall at 100%, scaled with the system DPI, top level and in
+    /// drop-downs alike.
+    /// </summary>
+    private static void ItemsUseFluentHeight()
+    {
+        float scale;
+        using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+        {
+            scale = g.DpiY / 96F;
+        }
+        int expected = (int)Math.Round(30 * scale);
+        using (ContextMenuStrip menu = BuildMenu())
+        {
+            TrayTheme.Apply(menu, false);
+            menu.PerformLayout();
+            var items = new List<ToolStripItem>();
+            foreach (ToolStripItem item in menu.Items)
+            {
+                items.Add(item);
+                ToolStripDropDownItem drop = item as ToolStripDropDownItem;
+                if (drop != null)
+                {
+                    drop.DropDown.PerformLayout();
+                    foreach (ToolStripItem child in drop.DropDownItems)
+                    {
+                        items.Add(child);
+                    }
+                }
+            }
+            foreach (ToolStripItem item in items)
+            {
+                if (item is ToolStripSeparator)
+                {
+                    continue;
+                }
+                Check(item.Height >= expected,
+                    "the menu item \"" + item.Text + "\" is " + item.Height + "px tall, Fluent rows are " + expected + "px");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The hover highlight is drawn inset from the menu's edges with rounded corners, so
+    /// the menu's own surface shows at the row's corners and sides.
+    /// </summary>
+    private static void TheHighlightIsInsetAndRounded()
+    {
+        TrayPalette palette = TrayPalette.Build(false);
+        using (ContextMenuStrip menu = BuildMenu())
+        {
+            TrayTheme.Apply(menu, false);
+            menu.PerformLayout();
+            ToolStripMenuItem exit = (ToolStripMenuItem)menu.Items[menu.Items.Count - 1];
+            using (Bitmap bmp = new Bitmap(exit.Width, exit.Height))
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                var renderer = (TrayThemeRenderer)menu.Renderer;
+                exit.Select();
+                Check(exit.Selected, "the Exit item should be selectable for this check");
+                renderer.DrawMenuItemBackground(new ToolStripItemRenderEventArgs(g, exit));
+                Color corner = bmp.GetPixel(0, 0);
+                Color middle = bmp.GetPixel(exit.Width / 2, exit.Height / 2);
+                Check(middle.ToArgb() == palette.Selection.ToArgb(),
+                    "the middle of a selected row should be the selection colour, was " + middle);
+                Check(corner.ToArgb() == palette.Surface.ToArgb(),
+                    "the corner of a selected row should be the menu surface, was " + corner);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The real tray menu has 29 rows and 6 separators. At 30px rows it was taller than a
+    /// 1080p screen at 150% (688px work area), so About, License and Exit went behind
+    /// scroll arrows. Rows shrink, never below their natural height, until the menu fits.
+    /// </summary>
+    private static void TheMenuFitsTheWorkArea()
+    {
+        using (var menu = new ContextMenuStrip())
+        {
+            for (int i = 0; i < 29; i++)
+            {
+                menu.Items.Add(new ToolStripMenuItem("Row " + i));
+                if (i % 5 == 4 && i < 29)
+                {
+                    menu.Items.Add(new ToolStripSeparator());
+                }
+            }
+            TrayTheme.Apply(menu, false, 688);
+            menu.PerformLayout();
+            Check(menu.PreferredSize.Height <= 688,
+                "a 29-row tray menu is " + menu.PreferredSize.Height + "px tall, over a 688px work area");
+        }
     }
 
     private static void TheMenuGetsACustomRenderer()
@@ -294,7 +392,7 @@ internal static class TrayThemeTests
         _checks++;
         // On a machine not in high contrast this is expected to be false, so this asserts
         // the code path exists rather than requiring the test host to be in high contrast.
-        Check(surfaceIsSystem || palette.Surface == Color.FromArgb(30, 41, 59),
+        Check(surfaceIsSystem || palette.Surface == FluentPalette.Build(false, true).Card,
             "the dark palette should be either the system menu colour or the app's own dark surface, but was " +
             palette.Surface);
         CheckReadable(palette.Text, palette.Surface, "dark palette text", 4.5);

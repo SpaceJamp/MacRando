@@ -179,9 +179,20 @@ internal static class ControlSweepTests
                 Settle(form);
             }
 
-            string where = "dashboard-" + (darkMode ? "dark" : "light")
-                + "-" + size.Width + "x" + size.Height + "@" + scale + "x";
-            count += Inspect(form, where, problems);
+            // Each page is swept: a page that is not selected is hidden, and the sweep only
+            // measures visible controls, so sweeping the default page alone would skip most
+            // of the dashboard.
+            PivotBar pivot = (PivotBar)typeof(DashboardForm)
+                .GetField("_pivot", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(form);
+            for (int page = 0; page < pivot.TabCount; page++)
+            {
+                pivot.SelectedIndex = page;
+                Settle(form);
+                string where = "dashboard-" + (darkMode ? "dark" : "light")
+                    + "-" + size.Width + "x" + size.Height + "@" + scale + "x-page-" + pivot.TabButton(page).Text;
+                count += Inspect(form, where, problems);
+            }
         }
         return count;
     }
@@ -225,9 +236,17 @@ internal static class ControlSweepTests
                 Settle(center);
             }
 
-            string where = "center-" + (darkMode ? "dark" : "light")
-                + "@" + scale + "x-" + center.Width + "x" + center.Height;
-            count += Inspect(center, where, problems);
+            PivotBar pivot = (PivotBar)typeof(NotificationCenterForm)
+                .GetField("_pivot", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(center);
+            for (int page = 0; page < pivot.TabCount; page++)
+            {
+                pivot.SelectedIndex = page;
+                Settle(center);
+                string where = "center-" + (darkMode ? "dark" : "light")
+                    + "@" + scale + "x-" + center.Width + "x" + center.Height + "-page-" + pivot.TabButton(page).Text;
+                count += Inspect(center, where, problems);
+            }
         }
         return count;
     }
