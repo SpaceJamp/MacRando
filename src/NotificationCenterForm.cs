@@ -38,6 +38,10 @@ namespace MacRando
         private readonly TextBox _updateUrlBox;
         private readonly TextBox _signerBox;
         private Label _footerLabel;
+        // Not readonly: built by BuildLayout, a method rather than the constructor.
+        private PivotBar _pivot;
+        private Panel _pageHost;
+        private FluentPalette _palette = FluentPalette.Build(false, false);
         private bool _allowClose;
         private bool _darkMode;
 
@@ -76,15 +80,14 @@ namespace MacRando
             MinimumSize = new Size(760, 500);
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
-            BackColor = darkMode ? Color.FromArgb(15, 23, 42) : Color.White;
-            Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            Font = new Font(FluentPalette.BodyFontFamily(), 9F, FontStyle.Regular, GraphicsUnit.Point);
             KeyPreview = true;
 
             _searchBox = new TextBox { Width = 220 };
             _severityFilter = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
             _severityFilter.Items.AddRange(new object[] { "All", NotificationKinds.Critical, NotificationKinds.Error, NotificationKinds.Warning, NotificationKinds.Success, NotificationKinds.Info });
             _severityFilter.SelectedIndex = 0;
-            _openButton = MakeButton("Open dashboard", false);
+            _openButton = MakeButton("Open dashboard", true);
             _restoreButton = MakeButton("Restore now", false);
             _retryButton = MakeButton("Retry", false);
             _diagnosticsButton = MakeButton("Diagnostics", false);
@@ -95,8 +98,7 @@ namespace MacRando
                 ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical,
                 Dock = DockStyle.Fill,
-                BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.FromArgb(248, 250, 252),
-                ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59)
+                BorderStyle = BorderStyle.FixedSingle
             };
             _list = new ListView
             {
@@ -126,9 +128,32 @@ namespace MacRando
 
             BuildLayout();
             WireEvents();
+            // A disabled primary button drops its accent fill; see FluentButton.Style.
+            foreach (Control control in Descendants(this))
+            {
+                Button button = control as Button;
+                if (button != null && !(button.Parent is PivotBar))
+                {
+                    button.EnabledChanged += delegate
+                    {
+                        if (!Accessibility.ShouldUseHighContrast())
+                        {
+                            FluentButton.Style(button, _palette);
+                        }
+                    };
+                }
+            }
             SetEntries(entries);
             ApplyTheme(_darkMode);
             ResumeLayout(false);
+            // NumericUpDown's margin is scaled again and again by display scaling on .NET
+            // Framework: a real 150% render showed 3px become 108px, scattering the spinners
+            // across the Preferences card. So it is set once scaling is done.
+            int spinnerMargin = (int)Math.Round(3 * CurrentAutoScaleDimensions.Height / 96F);
+            foreach (NumericUpDown spinner in new[] { _quietStart, _quietEnd, _duration })
+            {
+                spinner.Margin = new Padding(spinnerMargin);
+            }
             PerformLayout();
         }
 
@@ -165,33 +190,32 @@ namespace MacRando
         public void ApplyTheme(bool darkMode)
         {
             _darkMode = darkMode;
-            BackColor = darkMode ? Color.FromArgb(15, 23, 42) : Color.White;
-            ForeColor = darkMode ? Color.White : Color.FromArgb(15, 23, 42);
-            _list.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.White;
-            _list.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59);
-            _detailsBox.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.FromArgb(248, 250, 252);
-            _detailsBox.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59);
-            if (Accessibility.ShouldUseHighContrast())
+            bool highContrast = Accessibility.ShouldUseHighContrast();
+            _palette = FluentPalette.Build(highContrast, darkMode);
+            if (highContrast)
             {
                 // The form's own background is set before the child pass, so it has to be
                 // corrected here or the window frame keeps the app's colour.
                 BackColor = SystemColors.Window;
                 ForeColor = SystemColors.WindowText;
-                _list.BackColor = SystemColors.Window;
-                _list.ForeColor = SystemColors.WindowText;
-                _detailsBox.BackColor = SystemColors.Window;
-                _detailsBox.ForeColor = SystemColors.WindowText;
+            }
+            else
+            {
+                BackColor = _palette.Layer;
+                ForeColor = _palette.Text;
             }
             ApplyThemeToChildren(this, darkMode);
+            if (_pivot != null)
+            {
+                _pivot.ApplyPalette(_palette);
+            }
             if (_footerLabel != null)
             {
-                // Muted, but still above 4.5:1 against the themed background in both modes.
-                // Under high contrast the muted colour is the first thing to fail, so it
-                // becomes full contrast.
-                _footerLabel.ForeColor = Accessibility.ShouldUseHighContrast()
-                    ? SystemColors.WindowText
-                    : (darkMode ? Color.FromArgb(148, 163, 184) : Color.FromArgb(71, 85, 105));
+                // Muted, but still above 4.5:1 against the layer in both modes. Under high
+                // contrast the palette's secondary text is already full-contrast text.
+                _footerLabel.ForeColor = highContrast ? SystemColors.WindowText : _palette.TextSecondary;
             }
+            FluentChrome.Apply(this, darkMode && !highContrast);
             RefreshList();
         }
 
@@ -231,15 +255,43 @@ namespace MacRando
 
         private void BuildLayout()
         {
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(12) };
+            // Fluent layout: a header (title, search and list actions), a History /
+            // Preferences tab strip, the selected page, and a footer with Close.
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = Padding.Empty };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            var toolbar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
-            toolbar.Controls.Add(new Label { Text = "Search", AutoSize = true, Margin = new Padding(0, 7, 5, 0) });
+            var header = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(24, 12, 24, 0),
+                Margin = Padding.Empty
+            };
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var title = new Label
+            {
+                Text = "Notifications",
+                AutoSize = true,
+                Margin = new Padding(0, 0, 0, 6),
+                Font = new Font("Segoe UI Semibold", 20F, FontStyle.Bold, GraphicsUnit.Point)
+            };
+            header.Controls.Add(title, 0, 0);
+            // One row: it fits the 760px minimum width, and a wrapping flow panel inside an
+            // auto-sized table measures itself one control per row.
+            var toolbar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
+            toolbar.Controls.Add(new Label { Text = "Search", AutoSize = true, Margin = new Padding(0, 9, 5, 0) });
+            _searchBox.Margin = new Padding(0, 5, 8, 5);
             toolbar.Controls.Add(_searchBox);
+            _severityFilter.Margin = new Padding(0, 5, 8, 5);
             toolbar.Controls.Add(_severityFilter);
             var refresh = MakeButton("Refresh", false);
             refresh.Click += (sender, args) => RaiseRefresh();
@@ -247,33 +299,47 @@ namespace MacRando
             var clear = MakeButton("Clear history", false);
             clear.Click += (sender, args) => RaiseClearHistory();
             toolbar.Controls.Add(clear);
-            var close = MakeButton("Close", false);
-            close.Click += (sender, args) => Hide();
-            toolbar.Controls.Add(close);
+            header.Controls.Add(toolbar, 0, 1);
 
-            var split = new SplitContainer { Dock = DockStyle.Fill, Size = new Size(900, 400), FixedPanel = FixedPanel.Panel2 };
-            split.Panel1MinSize = 420;
+            _pivot = new PivotBar { Dock = DockStyle.Fill, Margin = new Padding(24, 8, 24, 0) };
+            _pageHost = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = Padding.Empty };
+
+            // History: the list beside a details card, with the selected entry's actions in
+            // a full-width row underneath. Inside the narrow details column the five buttons
+            // wrapped one per row at 150% and squeezed the details box to nothing.
+            var history = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(24, 12, 24, 12) };
+            history.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            history.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            // AutoSize, not a fixed height: on a narrow window the buttons wrap onto a
+            // second row, and a fixed height clipped it.
+            history.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var split = new SplitContainer { Dock = DockStyle.Fill, Size = new Size(900, 400), FixedPanel = FixedPanel.Panel2, Margin = Padding.Empty };
+            split.Panel1MinSize = 380;
             split.Panel2MinSize = 260;
-            split.SplitterDistance = 570;
+            split.SplitterDistance = 560;
             split.Panel1.Controls.Add(_list);
-            var detailsPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(8, 0, 0, 0) };
-            detailsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            detailsPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            // AutoSize, not a fixed 72. Five action buttons do not fit on one line in this
-            // column, so the panel wraps onto a second row, and a fixed height cannot
-            // accommodate that: at 100% scaling the second row was already clipped by six
-            // pixels, and at 150% it fell entirely outside the row, leaving "Diagnostics"
-            // and "Copy details" invisible and unclickable. The row has to grow with its
-            // contents, which is what the flow panels below this one already do.
-            detailsPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            detailsPanel.Controls.Add(_detailsBox, 0, 0);
+            var detailsCard = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 1,
+                Padding = new Padding(12),
+                Margin = Padding.Empty,
+                Tag = FluentCard.CardTag
+            };
+            FluentCard.Attach(detailsCard, delegate { return _palette; });
+            detailsCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            detailsCard.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            detailsCard.Controls.Add(_detailsBox, 0, 0);
+            split.Panel2.Padding = new Padding(12, 0, 0, 0);
+            split.Panel2.Controls.Add(detailsCard);
             var actions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 WrapContents = true,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Margin = Padding.Empty,
+                Margin = new Padding(0, 8, 0, 0),
                 FlowDirection = FlowDirection.LeftToRight
             };
             actions.Controls.Add(_openButton);
@@ -281,71 +347,116 @@ namespace MacRando
             actions.Controls.Add(_retryButton);
             actions.Controls.Add(_diagnosticsButton);
             actions.Controls.Add(_copyButton);
-            detailsPanel.Controls.Add(actions, 0, 1);
-            split.Panel2.Controls.Add(detailsPanel);
+            history.Controls.Add(split, 0, 0);
+            history.Controls.Add(actions, 0, 1);
 
-            // Two explicit rows instead of one wrapping flow. A GroupBox does not reliably
-            // grow around a single wrapping FlowLayoutPanel, which clipped the update fields.
-            var settings = new GroupBox { Text = "Notification preferences", Dock = DockStyle.Bottom, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8) };
-            var settingsRows = new TableLayoutPanel
+            // Preferences: two cards, then the buttons that act on them.
+            var preferences = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = Padding.Empty };
+            var preferencesPage = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
+                ColumnCount = 1,
+                RowCount = 3,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(24, 12, 24, 12)
+            };
+            preferencesPage.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            preferencesPage.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            preferencesPage.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            preferencesPage.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var popupsBody = new TableLayoutPanel
+            {
                 ColumnCount = 1,
                 RowCount = 2,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Margin = Padding.Empty
+                Padding = new Padding(12, 4, 12, 12)
             };
-            settingsRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            settingsRows.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            settingsRows.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            popupsBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            popupsBody.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            popupsBody.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var toggles = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
+            toggles.Controls.Add(_notificationsEnabled);
+            toggles.Controls.Add(_soundEnabled);
+            toggles.Controls.Add(_collapseEnabled);
+            popupsBody.Controls.Add(toggles, 0, 0);
+            var timing = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 4, 0, 0) };
+            timing.Controls.Add(_quietEnabled);
+            timing.Controls.Add(new Label { Text = "From", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
+            timing.Controls.Add(_quietStart);
+            timing.Controls.Add(new Label { Text = "to", AutoSize = true, Margin = new Padding(4, 7, 2, 0) });
+            timing.Controls.Add(_quietEnd);
+            timing.Controls.Add(new Label { Text = "Popup seconds", AutoSize = true, Margin = new Padding(16, 7, 2, 0) });
+            timing.Controls.Add(_duration);
+            popupsBody.Controls.Add(timing, 0, 1);
+            preferencesPage.Controls.Add(FluentCard.Create("Popups", popupsBody, delegate { return _palette; }), 0, 0);
 
-            var notificationRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
-            notificationRow.Controls.Add(_notificationsEnabled);
-            notificationRow.Controls.Add(_soundEnabled);
-            notificationRow.Controls.Add(_collapseEnabled);
-            notificationRow.Controls.Add(_quietEnabled);
-            notificationRow.Controls.Add(new Label { Text = "From", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
-            notificationRow.Controls.Add(_quietStart);
-            notificationRow.Controls.Add(new Label { Text = "to", AutoSize = true, Margin = new Padding(4, 7, 2, 0) });
-            notificationRow.Controls.Add(_quietEnd);
-            notificationRow.Controls.Add(new Label { Text = "Popup seconds", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
-            notificationRow.Controls.Add(_duration);
-            settingsRows.Controls.Add(notificationRow, 0, 0);
+            // Label and field pairs in a table: a wrapping flow panel in an auto-sized card
+            // measured itself one control per row and pushed the fields off the page.
+            var updatesBody = new TableLayoutPanel { ColumnCount = 2, RowCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(12, 4, 12, 12) };
+            updatesBody.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            updatesBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            updatesBody.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            updatesBody.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            updatesBody.Controls.Add(new Label { Text = "Update manifest URL", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(4, 4, 8, 4) }, 0, 0);
+            _updateUrlBox.Dock = DockStyle.Fill;
+            updatesBody.Controls.Add(_updateUrlBox, 1, 0);
+            updatesBody.Controls.Add(new Label { Text = "Expected signer", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(4, 4, 8, 4) }, 0, 1);
+            _signerBox.Dock = DockStyle.Fill;
+            updatesBody.Controls.Add(_signerBox, 1, 1);
+            preferencesPage.Controls.Add(FluentCard.Create("Updates", updatesBody, delegate { return _palette; }), 0, 1);
 
-            // Wraps rather than clips on a narrow window; the group auto-sizes to fit.
-            var updateRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
-            updateRow.Controls.Add(new Label { Text = "Update manifest URL", AutoSize = true, Margin = new Padding(0, 7, 2, 0) });
-            updateRow.Controls.Add(_updateUrlBox);
-            updateRow.Controls.Add(new Label { Text = "Expected signer", AutoSize = true, Margin = new Padding(8, 7, 2, 0) });
-            updateRow.Controls.Add(_signerBox);
+            var preferenceActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
             var apply = MakeButton("Apply preferences", true);
             apply.Click += (sender, args) => ApplySettings();
-            updateRow.Controls.Add(apply);
+            preferenceActions.Controls.Add(apply);
             var checkUpdates = MakeButton("Check for updates", false);
             checkUpdates.Click += (sender, args) => RaiseCheckUpdates();
-            updateRow.Controls.Add(checkUpdates);
+            preferenceActions.Controls.Add(checkUpdates);
             var sendTest = MakeButton("Send test notification", false);
             sendTest.Click += (sender, args) => RaiseSendTestNotification();
-            updateRow.Controls.Add(sendTest);
-            settingsRows.Controls.Add(updateRow, 0, 1);
-            settings.Controls.Add(settingsRows);
+            preferenceActions.Controls.Add(sendTest);
+            preferencesPage.Controls.Add(preferenceActions, 0, 2);
+            preferences.Controls.Add(preferencesPage);
 
-            var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
+            _pageHost.Controls.Add(history);
+            _pageHost.Controls.Add(preferences);
+            _pivot.AddTab("History", history);
+            _pivot.AddTab("Preferences", preferences);
+
+            var footer = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(24, 8, 24, 12),
+                Margin = Padding.Empty
+            };
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             var versionLabel = new Label
             {
                 Text = AppInfo.ProductName + " " + AppInfo.DisplayVersion + "  •  " + LicenseInfo.Notice + "  •  notifications are sanitized before storage",
                 AutoSize = true,
+                Anchor = AnchorStyles.Left,
                 Margin = Padding.Empty
             };
             _footerLabel = versionLabel;
-            footer.Controls.Add(versionLabel);
+            footer.Controls.Add(versionLabel, 0, 0);
+            var close = MakeButton("Close", false);
+            close.Margin = new Padding(8, 0, 0, 0);
+            close.Click += (sender, args) => Hide();
+            footer.Controls.Add(close, 1, 0);
 
-            root.Controls.Add(toolbar, 0, 0);
-            root.Controls.Add(split, 0, 1);
-            root.Controls.Add(settings, 0, 2);
+            root.Controls.Add(header, 0, 0);
+            root.Controls.Add(_pivot, 0, 1);
+            root.Controls.Add(_pageHost, 0, 2);
             root.Controls.Add(footer, 0, 3);
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Controls.Add(root);
 
             ApplyAccessibility();
@@ -697,9 +808,7 @@ namespace MacRando
                 AutoSize = true,
                 MinimumSize = new Size(84, 30),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = primary ? Color.FromArgb(37, 99, 235) : SystemColors.Control,
-                ForeColor = primary ? Color.White : SystemColors.ControlText,
-                Margin = new Padding(4),
+                Margin = new Padding(0, 4, 8, 4),
                 Tag = primary
             };
             // Without this the visual style ignores BackColor, so a themed button
@@ -734,8 +843,16 @@ namespace MacRando
             // combination that becomes invisible, and the whole point of high contrast
             // is that the user cannot read a subtle one.
             bool highContrast = Accessibility.ShouldUseHighContrast();
+            FluentPalette p = FluentPalette.Build(highContrast, darkMode);
+            // Inputs sit slightly recessed in dark mode, on white in light mode.
+            Color input = darkMode ? p.Background : p.Card;
             foreach (Control control in parent.Controls)
             {
+                if (control is PivotBar)
+                {
+                    // Styled by ApplyTheme through ApplyPalette.
+                    continue;
+                }
                 if (highContrast)
                 {
                     if (control is TextBox || control is ListView || control is ComboBox || control is NumericUpDown)
@@ -752,8 +869,14 @@ namespace MacRando
                         system.ForeColor = SystemColors.WindowText;
                     }
                     else if (control is GroupBox || control is TableLayoutPanel ||
-                             control is FlowLayoutPanel || control is SplitContainer)
+                             control is FlowLayoutPanel || control is SplitContainer || control is Panel)
                     {
+                        control.BackColor = SystemColors.Window;
+                        control.ForeColor = SystemColors.WindowText;
+                    }
+                    else if (control is Label || control is CheckBox)
+                    {
+                        control.BackColor = Color.Transparent;
                         control.ForeColor = SystemColors.WindowText;
                     }
                     ApplyThemeToChildren(control, darkMode);
@@ -761,53 +884,55 @@ namespace MacRando
                 }
                 if (control is TextBox)
                 {
-                    control.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.White;
-                    control.ForeColor = darkMode ? Color.White : Color.FromArgb(15, 23, 42);
+                    control.BackColor = input;
+                    control.ForeColor = p.Text;
                 }
                 else if (control is Button)
                 {
-                    Button button = (Button)control;
-                    bool primary = button.Tag is bool && (bool)button.Tag;
-                    // Both colors must move together. Setting only ForeColor here is what
-                    // produced white text on a light system button in dark mode.
-                    if (primary)
-                    {
-                        button.BackColor = Color.FromArgb(37, 99, 235);
-                        button.ForeColor = Color.White;
-                    }
-                    else
-                    {
-                        button.BackColor = darkMode ? Color.FromArgb(30, 41, 59) : Color.FromArgb(241, 245, 249);
-                        button.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(15, 23, 42);
-                    }
-                    button.FlatStyle = FlatStyle.Flat;
-                    button.UseVisualStyleBackColor = false;
-                    button.FlatAppearance.BorderColor = darkMode ? Color.FromArgb(71, 85, 105) : Color.FromArgb(203, 213, 225);
-                    button.FlatAppearance.MouseOverBackColor = darkMode ? Color.FromArgb(51, 65, 85) : Color.FromArgb(219, 234, 254);
+                    FluentButton.Style((Button)control, p);
                 }
                 else if (control is ListView)
                 {
-                    control.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.White;
-                    control.ForeColor = darkMode ? Color.White : Color.FromArgb(15, 23, 42);
+                    control.BackColor = input;
+                    control.ForeColor = p.Text;
                 }
                 else if (control is ComboBox)
                 {
                     ComboBox combo = (ComboBox)control;
-                    // The background must be themed too, otherwise the selected item is
-                    // white text on a white box in dark mode.
-                    combo.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.White;
-                    combo.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(15, 23, 42);
+                    // Flat, or a drop-down list ignores its background and the selected item
+                    // is white text on a white box in dark mode.
+                    combo.BackColor = input;
+                    combo.ForeColor = p.Text;
                     combo.FlatStyle = FlatStyle.Flat;
                 }
                 else if (control is NumericUpDown)
                 {
-                    NumericUpDown numeric = (NumericUpDown)control;
-                    numeric.BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.White;
-                    numeric.ForeColor = darkMode ? Color.FromArgb(226, 232, 240) : Color.FromArgb(15, 23, 42);
+                    control.BackColor = input;
+                    control.ForeColor = p.Text;
                 }
-                else if (control is GroupBox || control is TableLayoutPanel || control is FlowLayoutPanel || control is SplitContainer)
+                else if (control is Label)
                 {
-                    control.ForeColor = darkMode ? Color.White : SystemColors.ControlText;
+                    control.BackColor = control.Tag == FluentCard.TitleTag ? p.Card : Color.Transparent;
+                    control.ForeColor = p.Text;
+                }
+                else if (control is CheckBox)
+                {
+                    control.BackColor = Color.Transparent;
+                    control.ForeColor = p.Text;
+                }
+                else if (control is TableLayoutPanel || control is FlowLayoutPanel)
+                {
+                    // A card shows the layer at its rounded corners and paints its own fill;
+                    // its body is solid card colour.
+                    control.BackColor = control.Tag == FluentCard.CardTag ? p.Layer
+                        : (control.Tag == FluentCard.BodyTag ? p.Card : Color.Transparent);
+                    control.ForeColor = p.Text;
+                    control.Invalidate();
+                }
+                else if (control is GroupBox || control is SplitContainer || control is Panel)
+                {
+                    control.BackColor = p.Layer;
+                    control.ForeColor = p.Text;
                 }
                 ApplyThemeToChildren(control, darkMode);
             }

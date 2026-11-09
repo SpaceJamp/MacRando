@@ -56,33 +56,18 @@ namespace MacRando
                 };
             }
 
-            if (darkMode)
-            {
-                return new HighContrastPalette
-                {
-                    IsHighContrast = false,
-                    Surface = Color.FromArgb(15, 23, 42),
-                    SurfaceAlt = Color.FromArgb(30, 41, 59),
-                    Text = Color.FromArgb(241, 245, 249),
-                    TextMuted = Color.FromArgb(148, 163, 184),
-                    TextOnAccent = Color.White,
-                    Accent = Color.FromArgb(37, 99, 235),
-                    Border = Color.FromArgb(51, 65, 85),
-                    Muted = Color.FromArgb(148, 163, 184)
-                };
-            }
-
+            FluentPalette fluent = FluentPalette.Build(false, darkMode);
             return new HighContrastPalette
             {
                 IsHighContrast = false,
-                Surface = Color.White,
-                SurfaceAlt = Color.FromArgb(248, 250, 252),
-                Text = Color.FromArgb(15, 23, 42),
-                TextMuted = Color.FromArgb(71, 85, 105),
-                TextOnAccent = Color.White,
-                Accent = Color.FromArgb(30, 64, 175),
-                Border = Color.FromArgb(203, 213, 225),
-                Muted = Color.FromArgb(100, 116, 139)
+                Surface = fluent.Card,
+                SurfaceAlt = fluent.Layer,
+                Text = fluent.Text,
+                TextMuted = fluent.TextSecondary,
+                TextOnAccent = fluent.TextOnAccent,
+                Accent = fluent.Accent,
+                Border = fluent.ControlBorder,
+                Muted = fluent.TextSecondary
             };
         }
 

@@ -39,8 +39,10 @@ internal static class AccessibilityTests
             PendingBannerButtonsAreNamed();
             LiveControlsAreNamed();
             LiveControlsAreInReadingOrder();
+            TabFromThePivotEntersThePage();
             NotificationCenterControlsAreNamed();
             NotificationCenterHasReadingOrderTabSequence();
+            CenterPreferencesAreOnTheirPage();
             PopupControlsAreNamed();
             PopupDismissIsReachableWithoutTheCloseGlyph();
             HighContrastAppliesToTheCenter();
@@ -406,6 +408,68 @@ internal static class AccessibilityTests
         });
     }
 
+    /// <summary>
+    /// A keyboard user who reaches the dashboard's tab strip must get into the page it
+    /// shows with one Tab press. Pages that hold only read-only labels have nothing to land
+    /// on and are skipped; every other page must take focus to one of its own controls.
+    /// </summary>
+    private static void TabFromThePivotEntersThePage()
+    {
+        RunOnUiThread(delegate
+        {
+            using (DashboardForm form = new DashboardForm())
+            {
+                // An adapter is needed: with none selected the page's actions are disabled,
+                // and a disabled control cannot take focus.
+                form.SetAdapters(new[]
+                {
+                    new MacRando.AdapterInfo
+                    {
+                        Name = "Ethernet", Description = "Test adapter", InterfaceIndex = 3,
+                        InterfaceGuid = "{121EC763-A5F6-4EF7-AD11-554AD8464295}",
+                        Status = "Up", IsUp = true, MacAddress = "02-00-00-00-00-01",
+                        PermanentMacAddress = "A4-1B-C0-11-22-33", MacPropertySupported = true,
+                        IpAddress = "192.168.1.42", PrefixLength = 24, DhcpEnabled = true, LinkSpeed = "1 Gbps"
+                    }
+                });
+                form.SetVpnProfiles(new[] { new MacRando.VpnProfile { Name = "Home", ServerAddress = "vpn.example.com" } });
+                form.Size = new Size(1120, 720);
+                TestHelpers.ShowOffScreen(form);
+                Application.DoEvents();
+                FieldInfo pivotField = typeof(DashboardForm).GetField("_pivot", BindingFlags.Instance | BindingFlags.NonPublic);
+                FieldInfo hostField = typeof(DashboardForm).GetField("_pageHost", BindingFlags.Instance | BindingFlags.NonPublic);
+                Check(pivotField != null && hostField != null, "the dashboard needs _pivot and _pageHost fields");
+                MacRando.PivotBar pivot = (MacRando.PivotBar)pivotField.GetValue(form);
+                Control host = (Control)hostField.GetValue(form);
+                int entered = 0;
+                for (int page = 0; page < pivot.TabCount; page++)
+                {
+                    pivot.SelectedIndex = page;
+                    Application.DoEvents();
+                    Control tab = pivot.TabButton(page);
+                    tab.Focus();
+                    form.SelectNextControl(tab, true, true, true, true);
+                    Control focused = form.ActiveControl;
+                    while (focused is ContainerControl && ((ContainerControl)focused).ActiveControl != null)
+                    {
+                        focused = ((ContainerControl)focused).ActiveControl;
+                    }
+                    bool inPage = focused != null && host.Contains(focused) && focused.Visible;
+                    if (page == 3)
+                    {
+                        // Adapter details holds read-only labels only.
+                        continue;
+                    }
+                    Check(inPage, "Tab from the \"" + tab.Text + "\" tab went to " +
+                        (focused == null ? "nothing" : focused.GetType().Name + " \"" + focused.Text + "\"") +
+                        " instead of into its page");
+                    entered++;
+                }
+                Check(entered == 4, "four dashboard pages should take focus from the tab strip, " + entered + " did");
+            }
+        });
+    }
+
     private static void NotificationCenterControlsAreNamed()
     {
         RunOnUiThread(delegate
@@ -479,6 +543,43 @@ internal static class AccessibilityTests
                 TextBox search = Field<MacRando.NotificationCenterForm, TextBox>(center, "_searchBox");
                 Check(search.TabIndex < update.TabIndex,
                     "the search box must come before the settings fields");
+            }
+        });
+    }
+
+    /// <summary>
+    /// The notification center has a History tab and a Preferences tab. The preference
+    /// fields are on Preferences only, so they show when it is selected and not otherwise.
+    /// </summary>
+    private static void CenterPreferencesAreOnTheirPage()
+    {
+        RunOnUiThread(delegate
+        {
+            using (var center = new MacRando.NotificationCenterForm(
+                new AppSettings(), new List<NotificationHistoryEntry>(), false))
+            {
+                TestHelpers.ShowOffScreen(center);
+                Application.DoEvents();
+                FieldInfo pivotField = typeof(MacRando.NotificationCenterForm).GetField("_pivot", BindingFlags.Instance | BindingFlags.NonPublic);
+                Check(pivotField != null, "the notification center needs a _pivot tab strip");
+                MacRando.PivotBar pivot = (MacRando.PivotBar)pivotField.GetValue(center);
+                Check(pivot.TabCount == 2 && pivot.TabButton(0).Text == "History" && pivot.TabButton(1).Text == "Preferences",
+                    "the notification center tabs should be History and Preferences");
+                string[] fields = { "_updateUrlBox", "_signerBox", "_quietStart", "_duration" };
+                pivot.SelectedIndex = 1;
+                Application.DoEvents();
+                foreach (string name in fields)
+                {
+                    Control c = Field<MacRando.NotificationCenterForm, Control>(center, name);
+                    Check(c.Visible, name + " should be visible on the Preferences tab");
+                }
+                pivot.SelectedIndex = 0;
+                Application.DoEvents();
+                foreach (string name in fields)
+                {
+                    Control c = Field<MacRando.NotificationCenterForm, Control>(center, name);
+                    Check(!c.Visible, name + " should not be visible on the History tab");
+                }
             }
         });
     }

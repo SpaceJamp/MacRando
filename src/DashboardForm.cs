@@ -35,17 +35,14 @@ namespace MacRando
                 Reflow();
             }
 
+            // Columns are equal width, so every control must fit one column's share; a row
+            // whose total fitted still let one wide button run over its neighbour.
             private bool Fits(int columns, int available)
             {
-                for (int start = 0; start < _controls.Count; start += columns)
+                int cell = available / columns;
+                foreach (Control control in _controls)
                 {
-                    int required = 0;
-                    int end = Math.Min(start + columns, _controls.Count);
-                    for (int index = start; index < end; index++)
-                    {
-                        required += _controls[index].MinimumSize.Width + 8;
-                    }
-                    if (required > available)
+                    if (control.MinimumSize.Width + 8 > cell)
                     {
                         return false;
                     }
@@ -120,7 +117,7 @@ namespace MacRando
         /// of the row silently appearing.
         /// </summary>
         private const string PublicIpLocationOptInHint =
-            "Off. Enable \"Show public IP location\" in Safety and status.";
+            "Off. Enable \"Show public IP location\" on the Safety and settings page.";
 
         internal const string PublicIpLocationUnavailableHint =
             "The location service could not be reached. Press Refresh to try again.";
@@ -176,6 +173,11 @@ namespace MacRando
         private readonly Panel _headerPanel;
         private readonly Panel _listPanel;
         private readonly Panel _detailsPanel;
+        // Not readonly: built by BuildDetailsPane, a method rather than the constructor.
+        // The tab strip over the detail pages, and the panel the pages are stacked in.
+        private PivotBar _pivot;
+        private Panel _pageHost;
+        private FluentPalette _palette = FluentPalette.Build(false, false);
         private readonly Label _titleLabel;
         private readonly Label _subtitleLabel;
         private readonly Label _headerPublicIpLabel;
@@ -344,7 +346,7 @@ namespace MacRando
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             BackColor = Color.White;
-            Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            Font = new Font(FluentPalette.BodyFontFamily(), 9F, FontStyle.Regular, GraphicsUnit.Point);
             _themePath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "MacRando",
@@ -362,6 +364,7 @@ namespace MacRando
             _detailsPanel = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
 
             _titleLabel = MakeTitle(AppInfo.ProductName + " " + AppInfo.Version);
+            _titleLabel.Font = new Font("Segoe UI Semibold", 15F, FontStyle.Bold, GraphicsUnit.Point);
             _titleLabel.AutoSize = false;
             _titleLabel.Size = new Size(300, 30);
             _toolTip.SetToolTip(_titleLabel, AppInfo.ProductName + " " + AppInfo.DisplayVersion);
@@ -384,7 +387,7 @@ namespace MacRando
             _selectedTitleLabel.AutoSize = false;
             _selectedTitleLabel.AutoEllipsis = true;
             _selectedTitleLabel.Size = new Size(700, 30);
-            _selectedTitleLabel.Font = new Font("Segoe UI Semibold", 16F, FontStyle.Bold, GraphicsUnit.Point);
+            _selectedTitleLabel.Font = new Font("Segoe UI Semibold", 20F, FontStyle.Bold, GraphicsUnit.Point);
             _selectedStatusLabel = MakeMutedLabel("Connect or enable a physical network adapter.");
             _currentMacLabel = MakeValueLabel("-");
             _permanentMacLabel = MakeValueLabel("-");
@@ -476,6 +479,13 @@ namespace MacRando
                 Dock = DockStyle.Fill,
                 OwnerDraw = true
             };
+            // Taller rows, as in a Fluent list. A details ListView takes its row height from
+            // the small image list, and an image list is not display-scaled, so the height is
+            // scaled here by hand.
+            _adapterList.SmallImageList = new ImageList
+            {
+                ImageSize = new Size(1, Math.Max(16, (int)Math.Round(30 * CurrentAutoScaleDimensions.Height / 96F)))
+            };
             _adapterList.DrawColumnHeader += DrawAdapterColumnHeader;
             _adapterList.DrawItem += DrawAdapterItem;
             _adapterList.Resize += (sender, args) => AdjustAdapterColumns();
@@ -519,6 +529,14 @@ namespace MacRando
             BuildDetailsPane();
             BuildRootLayout();
             WireEvents();
+            foreach (Control control in EnumerateControls(this))
+            {
+                Button button = control as Button;
+                if (button != null && !(button.Parent is PivotBar))
+                {
+                    button.EnabledChanged += delegate { StyleButton(button); };
+                }
+            }
             ApplyHeaderAccessibility();
             ApplyActionAccessibility();
             ApplyTabOrder();
@@ -883,7 +901,11 @@ namespace MacRando
         /// </summary>
         private void SizeTextLabelsToFit()
         {
-            var labels = new[] { _headerPublicIpLabel, _headerPublicIpLocationLabel, _publicIpLabel, _publicIpLocationLabel };
+            var labels = new[]
+            {
+                _headerPublicIpLabel, _headerPublicIpLocationLabel, _publicIpLabel, _publicIpLocationLabel,
+                _selectedTitleLabel, _selectedStatusLabel, _titleLabel, _subtitleLabel
+            };
             foreach (Label label in labels)
             {
                 if (label == null || !label.Visible && label.Height == 0)
@@ -1108,14 +1130,20 @@ namespace MacRando
 
         private void BuildRootLayout()
         {
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(0) };
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            // Two columns: the adapter list on the window background, and the content layer
+            // holding, top to bottom, the pending banner, the selected adapter's header, the
+            // page tabs, the pages, and the status line.
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new Padding(0) };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.Controls.Add(_headerPanel, 0, 0);
 
-            _pendingBanner = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Visible = false, Padding = new Padding(18, 8, 18, 8), Margin = Padding.Empty, Tag = Color.Goldenrod };
-            var bannerLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+            _pendingBanner = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Visible = false, Padding = new Padding(14, 8, 12, 8), Margin = new Padding(24, 16, 24, 0) };
+            // The message has a row of its own above the buttons: beside them, in the
+            // narrower content column, it wrapped onto more lines than the row allowed.
+            var bannerLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 2, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+            bannerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            bannerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bannerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -1125,9 +1153,20 @@ namespace MacRando
             // as tall as the label happened to be, and display scaling then enlarged that
             // arbitrary height instead of the text.
             _pendingBannerLabel.AutoSize = true;
-            _pendingBannerLabel.Dock = DockStyle.Fill;
+            _pendingBannerLabel.AutoEllipsis = false;
+            _pendingBannerLabel.Anchor = AnchorStyles.Left | AnchorStyles.Top;
             _pendingBannerLabel.TextAlign = ContentAlignment.MiddleLeft;
-            _pendingBannerLabel.Margin = new Padding(0, 0, 12, 0);
+            _pendingBannerLabel.Margin = new Padding(0, 0, 0, 8);
+            // An auto-sized label only wraps within a maximum width, so the width follows
+            // the banner.
+            bannerLayout.SizeChanged += (sender, args) =>
+            {
+                int width = Math.Max(1, bannerLayout.ClientSize.Width - bannerLayout.Padding.Horizontal);
+                if (_pendingBannerLabel.MaximumSize.Width != width)
+                {
+                    _pendingBannerLabel.MaximumSize = new Size(width, 0);
+                }
+            };
             // Kept separate from Restore, and hidden unless the pending change is a MAC
             // change, because keeping is the one action here that MacRando cannot undo.
             _keepChangeButton = MakeButton("Keep change", false, new Size(104, 28));
@@ -1157,18 +1196,36 @@ namespace MacRando
             bannerDismissButton.Click += (sender, args) => _pendingBanner.Visible = false;
             _toolTip.SetToolTip(bannerDismissButton, "Hide this banner for the current session. The tray menu can still restore pending profiles.");
             bannerLayout.Controls.Add(_pendingBannerLabel, 0, 0);
-            bannerLayout.Controls.Add(_keepChangeButton, 1, 0);
-            bannerLayout.Controls.Add(restoreAllButton, 2, 0);
-            bannerLayout.Controls.Add(bannerDismissButton, 3, 0);
+            bannerLayout.SetColumnSpan(_pendingBannerLabel, 4);
+            bannerLayout.Controls.Add(_keepChangeButton, 1, 1);
+            bannerLayout.Controls.Add(restoreAllButton, 2, 1);
+            bannerLayout.Controls.Add(bannerDismissButton, 3, 1);
             _pendingBanner.Controls.Add(bannerLayout);
-            root.Controls.Add(_pendingBanner, 0, 1);
 
-            var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new Padding(0) };
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44));
-            body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56));
-            body.Controls.Add(_listPanel, 0, 0);
-            body.Controls.Add(_detailsPanel, 1, 0);
-            root.Controls.Add(body, 0, 2);
+            var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = Padding.Empty, Margin = Padding.Empty };
+            content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            content.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            // A fixed row rather than one sized from the label: the status text changes with
+            // every operation, and a row that followed it would move the pages above.
+            content.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+            content.Controls.Add(_pendingBanner, 0, 0);
+            content.Controls.Add(_headerPanel, 0, 1);
+            _pivot.Dock = DockStyle.Fill;
+            _pivot.Margin = new Padding(24, 8, 24, 0);
+            content.Controls.Add(_pivot, 0, 2);
+            content.Controls.Add(_pageHost, 0, 3);
+            _operationStatusLabel.Dock = DockStyle.Fill;
+            _operationStatusLabel.AutoEllipsis = true;
+            _operationStatusLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _operationStatusLabel.Margin = new Padding(24, 0, 24, 0);
+            content.Controls.Add(_operationStatusLabel, 0, 4);
+            _detailsPanel.Controls.Add(content);
+
+            root.Controls.Add(_listPanel, 0, 0);
+            root.Controls.Add(_detailsPanel, 1, 0);
             Controls.Add(root);
         }
 
@@ -1243,11 +1300,11 @@ namespace MacRando
             Accessibility.Describe(_headerPublicIpLocationLabel, "Public IP location", AccessibleRole.Text,
                 "The approximate city, region, and country of the public IP address, with the " +
                 "network number. Empty until you enable \"Show public IP location\" in Safety " +
-                "and status, which sends the address to ipinfo.io.");
+                "and settings, which sends the address to ipinfo.io.");
             Accessibility.Describe(_publicIpLocationLabel, "Public IP location", AccessibleRole.Text,
                 "The approximate city, region, and country of the public IP address, with the " +
                 "internet provider and its network number. Shown only after you enable " +
-                "\"Show public IP location\" in Safety and status, which sends the address to " +
+                "\"Show public IP location\" on the Safety and settings page, which sends the address to " +
                 "ipinfo.io.");
             Accessibility.Describe(_titleLabel, "MacRando", AccessibleRole.Text,
                 "Application title and version.");
@@ -1264,16 +1321,19 @@ namespace MacRando
             var layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                ColumnCount = 4,
+                ColumnCount = 3,
                 RowCount = 1,
-                Padding = new Padding(24, 10, 24, 8),
+                Padding = new Padding(24, 12, 24, 0),
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink
             };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            // The selected adapter's name and status, then the public IP and Refresh. The
+            // app title moved to the top of the adapter list.
+            // Shares, not a fixed 220px IP column: in a narrow window at 200% the fixed
+            // column took the whole width and squeezed the adapter name to 1px under it.
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             var titleLayout = new TableLayoutPanel
             {
@@ -1288,16 +1348,21 @@ namespace MacRando
             titleLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             titleLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             titleLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            _titleLabel.Dock = DockStyle.Top;
-            _titleLabel.AutoSize = true;
-            _titleLabel.TextAlign = ContentAlignment.MiddleLeft;
-            _titleLabel.Margin = Padding.Empty;
-            _subtitleLabel.Dock = DockStyle.Top;
-            _subtitleLabel.AutoSize = true;
-            _subtitleLabel.TextAlign = ContentAlignment.MiddleLeft;
-            _subtitleLabel.Margin = Padding.Empty;
-            titleLayout.Controls.Add(_titleLabel, 0, 0);
-            titleLayout.Controls.Add(_subtitleLabel, 0, 1);
+            // Not AutoSize: an adapter name longer than the column would widen an auto-sized
+            // label over the public IP. Fixed width with an ellipsis, and the height is set
+            // from the font in SizeTextLabelsToFit.
+            _selectedTitleLabel.Dock = DockStyle.Top;
+            _selectedTitleLabel.AutoSize = false;
+            _selectedTitleLabel.AutoEllipsis = true;
+            _selectedTitleLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _selectedTitleLabel.Margin = Padding.Empty;
+            _selectedStatusLabel.Dock = DockStyle.Top;
+            _selectedStatusLabel.AutoSize = false;
+            _selectedStatusLabel.AutoEllipsis = true;
+            _selectedStatusLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _selectedStatusLabel.Margin = Padding.Empty;
+            titleLayout.Controls.Add(_selectedTitleLabel, 0, 0);
+            titleLayout.Controls.Add(_selectedStatusLabel, 0, 1);
             layout.Controls.Add(titleLayout, 0, 0);
             _headerPublicIpLabel.Anchor = AnchorStyles.Right | AnchorStyles.Top;
             _headerPublicIpLabel.Size = new Size(180, 28);
@@ -1342,13 +1407,11 @@ namespace MacRando
             _headerPublicIpLocationLabel.TextAlign = ContentAlignment.MiddleRight;
             headerPublicIpLayout.Controls.Add(_headerPublicIpLabel, 0, 0);
             headerPublicIpLayout.Controls.Add(_headerPublicIpLocationLabel, 0, 1);
+            headerPublicIpLayout.Margin = new Padding(12, 4, 12, 0);
             layout.Controls.Add(headerPublicIpLayout, 1, 0);
-            _darkModeCheckBox.Anchor = AnchorStyles.Right | AnchorStyles.Top;
-            layout.Controls.Add(_darkModeCheckBox, 2, 0);
-            _refreshButton.Anchor = AnchorStyles.Top;
-            _refreshButton.Dock = DockStyle.Top;
-            _refreshButton.Margin = Padding.Empty;
-            layout.Controls.Add(_refreshButton, 3, 0);
+            _refreshButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            _refreshButton.Margin = new Padding(0, 4, 0, 0);
+            layout.Controls.Add(_refreshButton, 2, 0);
             _headerPanel.Controls.Add(layout);
         }
 
@@ -1505,13 +1568,14 @@ namespace MacRando
             {
                 sequence.Add(restoreAll);
             }
+            // Reading order of the new layout: the adapter list column, the header's Refresh,
+            // then each page's controls in page order. Dark mode now sits on the last page.
             sequence.AddRange(new Control[]
             {
-                _darkModeCheckBox,
-                _refreshButton,
                 _adapterSearchBox,
                 _connectedOnlyCheckBox,
                 _adapterList,
+                _refreshButton,
                 _macTextBox,
                 _vpnCombo,
                 _presetCombo,
@@ -1525,8 +1589,9 @@ namespace MacRando
                 _disconnectVpnButton,
                 _restorePermanentButton,
                 _restoreButton,
-                _startupRandomizeButton,
                 _ipPreflightButton,
+                _darkModeCheckBox,
+                _startupRandomizeButton,
                 _notificationCenterButton
             });
             for (int index = 0; index < sequence.Count; index++)
@@ -1540,22 +1605,51 @@ namespace MacRando
 
         private void BuildListPane()
         {
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(18, 18, 14, 14) };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Padding = new Padding(16, 12, 16, 12) };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             // Sized to the filter row's contents. A fixed height clipped the bottom of the
             // Star selected button, which sizes itself to its text, at 150% scaling.
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            Label title = MakeMutedLabel("PHYSICAL ADAPTERS");
+
+            // The app title and description head the adapter list, as a Fluent app's name
+            // heads its navigation pane. Heights come from the font, in SizeTextLabelsToFit.
+            var titleStack = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                ColumnCount = 1,
+                RowCount = 2,
+                Padding = Padding.Empty,
+                Margin = new Padding(0, 0, 0, 10),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
+            };
+            titleStack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            titleStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            titleStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _titleLabel.Dock = DockStyle.Top;
+            _titleLabel.AutoEllipsis = true;
+            _titleLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _titleLabel.Margin = Padding.Empty;
+            _subtitleLabel.Dock = DockStyle.Top;
+            _subtitleLabel.AutoEllipsis = true;
+            _subtitleLabel.TextAlign = ContentAlignment.MiddleLeft;
+            _subtitleLabel.Margin = Padding.Empty;
+            titleStack.Controls.Add(_titleLabel, 0, 0);
+            titleStack.Controls.Add(_subtitleLabel, 0, 1);
+            layout.Controls.Add(titleStack, 0, 0);
+
+            Label title = MakeMutedLabel("Physical adapters");
             title.AutoSize = false;
             title.Dock = DockStyle.Fill;
             title.TextAlign = ContentAlignment.MiddleLeft;
-            title.Font = new Font("Segoe UI Semibold", 8F, FontStyle.Bold, GraphicsUnit.Point);
-            layout.Controls.Add(title, 0, 0);
+            title.Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold, GraphicsUnit.Point);
+            layout.Controls.Add(title, 0, 3);
 
             _adapterSearchBox = new TextBox { Dock = DockStyle.Fill, Margin = new Padding(0, 2, 0, 4) };
             SetCueBanner(_adapterSearchBox, "Search adapters...");
@@ -1589,7 +1683,7 @@ namespace MacRando
             _toolTip.SetToolTip(_favoriteButton, "Mark or unmark the selected adapter as a favorite. Favorites are listed first.");
             _favoriteButton.Click += (sender, args) =>
             {
-                if (SelectedAdapter != null && AdapterViewChanged != null)
+                if (SelectedAdapter != null && ToggleFavoriteRequested != null)
                 {
                     ToggleFavoriteRequested(this, EventArgs.Empty);
                 }
@@ -1598,16 +1692,16 @@ namespace MacRando
             filterRow.Controls.Add(_favoriteButton);
             layout.Controls.Add(filterRow, 0, 2);
 
-            layout.Controls.Add(_adapterList, 0, 3);
+            layout.Controls.Add(_adapterList, 0, 4);
             _listHintLabel.Dock = DockStyle.Fill;
             _listHintLabel.TextAlign = ContentAlignment.MiddleLeft;
-            layout.Controls.Add(_listHintLabel, 0, 4);
+            layout.Controls.Add(_listHintLabel, 0, 5);
             _licenseLabel = MakeMutedLabel(LicenseInfo.Notice);
             _licenseLabel.Dock = DockStyle.Fill;
             _licenseLabel.TextAlign = ContentAlignment.MiddleLeft;
             _licenseLabel.Font = new Font("Segoe UI", 8F, FontStyle.Regular, GraphicsUnit.Point);
             _toolTip.SetToolTip(_licenseLabel, "Open the tray menu and choose License to read the full " + LicenseInfo.Name + ".");
-            layout.Controls.Add(_licenseLabel, 0, 5);
+            layout.Controls.Add(_licenseLabel, 0, 6);
             _listPanel.Controls.Add(layout);
         }
 
@@ -1825,8 +1919,13 @@ namespace MacRando
 
         private void BuildDetailsPane()
         {
-            TableLayoutPanel page = CreatePageLayout();
-            AddPageHeading(page, _selectedTitleLabel, _selectedStatusLabel);
+            // One page per card. The selected adapter's name and status moved to the header,
+            // which every page shares.
+            TableLayoutPanel macPage = CreatePageLayout();
+            TableLayoutPanel networkPage = CreatePageLayout();
+            TableLayoutPanel vpnPage = CreatePageLayout();
+            TableLayoutPanel detailsPage = CreatePageLayout();
+            TableLayoutPanel settingsPage = CreatePageLayout();
 
             _driverLabel = MakeValueLabel("—");
             _interfaceIndexLabel = MakeValueLabel("—");
@@ -1847,7 +1946,7 @@ namespace MacRando
             _guidLabel = MakeValueLabel("—");
             ConfigureValueCell(_guidLabel);
             adapterBody.Controls.Add(_guidLabel, 1, 3);
-            AddPageRow(page, adapterCard);
+            AddPageRow(detailsPage, adapterCard);
 
             TableLayoutPanel macBody;
             TableLayoutPanel macCard = CreateCard("MAC address", 2, 6, out macBody);
@@ -1882,7 +1981,7 @@ namespace MacRando
                 _restoreButton);
             macBody.Controls.Add(actionRow, 0, 5);
             macBody.SetColumnSpan(actionRow, 2);
-            AddPageRow(page, macCard);
+            AddPageRow(macPage, macCard);
 
             TableLayoutPanel networkBody;
             TableLayoutPanel networkCard = CreateCard("Local network", 2, 5, out networkBody);
@@ -1903,8 +2002,12 @@ namespace MacRando
             _networkDnsLabel.TextAlign = ContentAlignment.MiddleLeft;
             _networkDnsLabel.Margin = Padding.Empty;
             networkBody.Controls.Add(_dnsCombo, 1, 3);
-            networkBody.Controls.Add(CreateActionGrid(2, _randomizeIpButton, _applyDnsButton), 1, 4);
-            AddPageRow(page, networkCard);
+            // IP preflight moved here from the old Safety and status card: it reports what
+            // a local IP change would do, so it belongs beside the button that makes one.
+            TableLayoutPanel networkActions = CreateActionGrid(2, _randomizeIpButton, _applyDnsButton, _ipPreflightButton);
+            networkBody.Controls.Add(networkActions, 0, 4);
+            networkBody.SetColumnSpan(networkActions, 2);
+            AddPageRow(networkPage, networkCard);
 
             TableLayoutPanel vpnBody;
             TableLayoutPanel vpnCard = CreateCard("Public IP and VPN", 2, 4, out vpnBody);
@@ -1950,25 +2053,28 @@ namespace MacRando
             vpnBody.Controls.Add(_vpnCombo, 1, 1);
             vpnBody.Controls.Add(_vpnHintLabel, 1, 2);
             vpnBody.Controls.Add(CreateActionGrid(2, _connectVpnButton, _disconnectVpnButton), 0, 3);
-            AddPageRow(page, vpnCard);
+            AddPageRow(vpnPage, vpnCard);
 
             TableLayoutPanel safetyBody;
-            TableLayoutPanel safetyCard = CreateCard("Safety and status", 1, 7, out safetyBody);
+            TableLayoutPanel safetyCard = CreateCard("Safety and settings", 1, 6, out safetyBody);
             ConfigureSafetyBody(safetyBody);
+            AddPageRow(settingsPage, safetyCard);
 
-            var detailsLayout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 2,
-                Padding = Padding.Empty,
-                Margin = Padding.Empty
-            };
-            detailsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            detailsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            detailsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            // Each page sits in its own clipping scroll host: AutoScroll on a TableLayoutPanel
+            // does not clip its children, so a page taller than the window would draw over
+            // the status line below it.
+            _pageHost = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = Padding.Empty };
+            _pivot = new PivotBar();
+            AddDetailPage("MAC address", macPage);
+            AddDetailPage("Local network", networkPage);
+            AddDetailPage("Public IP and VPN", vpnPage);
+            AddDetailPage("Adapter details", detailsPage);
+            AddDetailPage("Safety and settings", settingsPage);
+        }
 
-            // A clipping scroll host keeps the cards from overlapping the Safety card.
+        private void AddDetailPage(string label, TableLayoutPanel page)
+        {
+            page.Padding = new Padding(24, 12, 24, 12);
             var scrollHost = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -1977,11 +2083,8 @@ namespace MacRando
                 Padding = Padding.Empty
             };
             scrollHost.Controls.Add(page);
-            detailsLayout.Controls.Add(scrollHost, 0, 0);
-            safetyCard.Dock = DockStyle.Top;
-            safetyCard.Margin = Padding.Empty;
-            detailsLayout.Controls.Add(safetyCard, 0, 1);
-            _detailsPanel.Controls.Add(detailsLayout);
+            _pageHost.Controls.Add(scrollHost);
+            _pivot.AddTab(label, scrollHost);
         }
 
         private void WireEvents()
@@ -2217,12 +2320,18 @@ namespace MacRando
         {
             try
             {
-                return File.Exists(_themePath) && string.Equals(File.ReadAllText(_themePath).Trim(), "dark", StringComparison.OrdinalIgnoreCase);
+                return ParseThemePreference(File.Exists(_themePath) ? File.ReadAllText(_themePath) : null);
             }
             catch
             {
-                return false;
+                return true;
             }
+        }
+
+        /// <summary>Dark unless the saved text says "light"; a missing or unreadable file means dark.</summary>
+        internal static bool ParseThemePreference(string saved)
+        {
+            return !string.Equals((saved ?? "").Trim(), "light", StringComparison.OrdinalIgnoreCase);
         }
 
         private bool SaveThemePreference(bool dark)
@@ -2284,16 +2393,6 @@ namespace MacRando
             }
         }
 
-        private static void DrawCardBorder(object sender, PaintEventArgs e)
-        {
-            Panel card = (Panel)sender;
-            Color color = card.Tag is Color ? (Color)card.Tag : Color.Gray;
-            using (Pen pen = new Pen(color))
-            {
-                e.Graphics.DrawRectangle(pen, 0, 0, card.ClientSize.Width - 1, card.ClientSize.Height - 1);
-            }
-        }
-
         private void DrawAdapterColumnHeader(object sender, DrawListViewColumnHeaderEventArgs e)
         {
             using (SolidBrush brush = new SolidBrush(_listHeaderColor))
@@ -2306,7 +2405,7 @@ namespace MacRando
                     e.Header.Text,
                     _adapterList.Font,
                     Rectangle.Inflate(e.Bounds, -4, 0),
-                    _listTextColor,
+                    _listMutedColor,
                     TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter);
             }
         }
@@ -2330,11 +2429,20 @@ namespace MacRando
                 ? _listSelectedTextColor
                 : (changeable ? _listTextColor : _listMutedColor);
             using (SolidBrush brush = new SolidBrush(background))
-            using (Pen pen = new Pen(_listHeaderColor))
             {
                 e.Graphics.FillRectangle(brush, e.Bounds);
-                e.Graphics.DrawLine(pen, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
-                int x = e.Bounds.Left;
+                if (selected)
+                {
+                    // Fluent's selection indicator: a short accent bar on the row's left edge.
+                    float scale = FluentScale.For(_adapterList);
+                    int barWidth = Math.Max(2, (int)Math.Round(3 * scale));
+                    int inset = Math.Max(2, e.Bounds.Height / 4);
+                    using (SolidBrush bar = new SolidBrush(_palette.Accent))
+                    {
+                        e.Graphics.FillRectangle(bar, e.Bounds.Left, e.Bounds.Top + inset, barWidth, Math.Max(1, e.Bounds.Height - 2 * inset));
+                    }
+                }
+                int x = e.Bounds.Left + (int)Math.Round(6 * FluentScale.For(_adapterList));
                 for (int index = 0; index < _adapterList.Columns.Count; index++)
                 {
                     ColumnHeader column = _adapterList.Columns[index];
@@ -2364,36 +2472,46 @@ namespace MacRando
             // they need a specific palette, and MacRando's own colours would override that
             // decision with a preference they cannot see.
             bool highContrast = Accessibility.ShouldUseHighContrast();
-            HighContrastPalette palette = Accessibility.BuildPalette(highContrast, dark);
+            FluentPalette p = FluentPalette.Build(highContrast, dark);
+            _palette = p;
 
-            Color background = highContrast
-                ? palette.Surface
-                : (dark ? Color.FromArgb(15, 23, 42) : Color.FromArgb(245, 247, 250));
-            Color surface = highContrast ? palette.Surface : (dark ? Color.FromArgb(30, 41, 59) : Color.White);
-            Color input = highContrast ? palette.Surface : (dark ? Color.FromArgb(15, 23, 42) : Color.White);
-            Color text = highContrast ? palette.Text : (dark ? Color.FromArgb(226, 232, 240) : Color.FromArgb(30, 41, 59));
-            // Muted text is folded back to full-contrast text in high contrast, because a
-            // deliberately low-contrast secondary is the first thing to become unreadable.
-            Color secondary = highContrast ? palette.Text : (dark ? Color.FromArgb(148, 163, 184) : Color.FromArgb(71, 85, 105));
-            Color accent = highContrast ? palette.Accent : (dark ? Color.FromArgb(96, 165, 250) : Color.FromArgb(37, 99, 235));
-            Color border = highContrast ? palette.Border : (dark ? Color.FromArgb(71, 85, 105) : Color.FromArgb(203, 213, 225));
-            Color listHeader = highContrast ? palette.SurfaceAlt : (dark ? Color.FromArgb(51, 65, 85) : Color.FromArgb(226, 232, 240));
+            // Under high contrast every token is already a system colour (FluentPalette maps
+            // them from Accessibility.BuildPalette), and muted text is full-contrast text.
+            Color background = p.Background;
+            Color layer = p.Layer;
+            Color input = dark && !highContrast ? p.Background : p.Card;
+            Color text = p.Text;
+            Color secondary = p.TextSecondary;
+            Color accent = p.Accent;
+            Color border = p.ControlBorder;
             _highContrastActive = highContrast;
-            _listInputColor = input;
-            _listHeaderColor = listHeader;
+            _listInputColor = background;
+            _listHeaderColor = background;
             _listTextColor = text;
             _listMutedColor = secondary;
-            _listSelectedColor = accent;
-            _listSelectedTextColor = dark ? Color.FromArgb(15, 23, 42) : Color.White;
+            _listSelectedColor = SelectedRowFill(highContrast, p);
+            _listSelectedTextColor = SelectedRowText(highContrast, p);
+            ApplyControlTheme(this, background, layer, input, text, secondary, accent, border, background);
             BackColor = background;
-            _detailsPanel.BackColor = background;
-            _headerPanel.BackColor = surface;
-            _listPanel.BackColor = dark ? Color.FromArgb(15, 23, 42) : Color.FromArgb(248, 250, 252);
-            ApplyControlTheme(this, background, surface, input, text, secondary, accent, border, listHeader);
-            _detailsPanel.BackColor = background;
-            _headerPanel.BackColor = surface;
-            _listPanel.BackColor = dark ? Color.FromArgb(15, 23, 42) : Color.FromArgb(248, 250, 252);
+            _listPanel.BackColor = background;
+            if (!highContrast)
+            {
+                // The list blends into its pane, as a Fluent list does.
+                _adapterList.BackColor = background;
+            }
+            _detailsPanel.BackColor = layer;
+            _headerPanel.BackColor = layer;
+            _pageHost.BackColor = layer;
+            if (!highContrast)
+            {
+                _pendingBanner.BackColor = p.InfoBackground;
+                _pendingBannerLabel.ForeColor = text;
+            }
+            _pivot.ApplyPalette(p);
+            _adapterList.Invalidate();
+            FluentChrome.Apply(this, dark && !highContrast);
             _titleLabel.ForeColor = text;
+            _selectedTitleLabel.ForeColor = text;
             _subtitleLabel.ForeColor = secondary;
             _licenseLabel.ForeColor = secondary;
             _headerPublicIpLabel.ForeColor = secondary;
@@ -2415,6 +2533,12 @@ namespace MacRando
 
         private void ApplyControlTheme(Control control, Color background, Color surface, Color input, Color text, Color secondary, Color accent, Color border, Color listHeader)
         {
+            // The tab strip styles itself from the palette (ApplyTheme calls ApplyPalette);
+            // the generic button styling below would give its tabs borders and fills.
+            if (control is PivotBar)
+            {
+                return;
+            }
             if (_highContrastActive)
             {
                 // Under high contrast the OS draws the borders, so the flat custom styling
@@ -2430,6 +2554,10 @@ namespace MacRando
                     ButtonBase button = (ButtonBase)control;
                     button.FlatStyle = FlatStyle.Standard;
                     button.UseVisualStyleBackColor = true;
+                }
+                if (control is ComboBox)
+                {
+                    ((ComboBox)control).FlatStyle = FlatStyle.Standard;
                 }
                 if (control is Panel || control is TableLayoutPanel || control is Form)
                 {
@@ -2453,23 +2581,14 @@ namespace MacRando
             }
             else if (control is Label)
             {
-                control.BackColor = Color.Transparent;
-                control.ForeColor = secondary;
+                // Card titles sit on the card's own fill; every other label is transparent
+                // over a solid parent. Bold labels (values, titles) read as primary text.
+                control.BackColor = control.Tag == FluentCard.TitleTag ? _palette.Card : Color.Transparent;
+                control.ForeColor = control.Font.Bold ? text : secondary;
             }
             else if (control is Button)
             {
-                Button button = (Button)control;
-                button.FlatStyle = FlatStyle.Flat;
-                button.FlatAppearance.BorderColor = border;
-                button.FlatAppearance.MouseOverBackColor = button.Tag is bool && (bool)button.Tag
-                    ? (_darkMode ? Color.FromArgb(30, 64, 175) : Color.FromArgb(29, 78, 216))
-                    : (_darkMode ? Color.FromArgb(51, 65, 85) : Color.FromArgb(219, 234, 254));
-                button.FlatAppearance.MouseDownBackColor = button.Tag is bool && (bool)button.Tag
-                    ? (_darkMode ? Color.FromArgb(30, 64, 175) : Color.FromArgb(30, 64, 175))
-                    : (_darkMode ? Color.FromArgb(71, 85, 105) : Color.FromArgb(191, 219, 254));
-                button.UseVisualStyleBackColor = false;
-                button.BackColor = button.Tag is bool && (bool)button.Tag ? accent : surface;
-                button.ForeColor = button.Tag is bool && (bool)button.Tag ? _listSelectedTextColor : text;
+                StyleButton((Button)control);
             }
             else if (control is CheckBox)
             {
@@ -2487,7 +2606,10 @@ namespace MacRando
             }
             else if (control is ComboBox)
             {
+                // Flat, because a visual-styles drop-down list ignores BackColor and stayed
+                // white in dark mode.
                 ComboBox combo = (ComboBox)control;
+                combo.FlatStyle = FlatStyle.Flat;
                 combo.BackColor = input;
                 combo.ForeColor = text;
             }
@@ -2500,26 +2622,27 @@ namespace MacRando
             }
             else if (control is TableLayoutPanel || control is FlowLayoutPanel)
             {
-                control.BackColor = Color.Transparent;
-                if (control.Tag is Color)
+                // A card shows the layer at its rounded corners and paints its own fill;
+                // its body is solid card colour so the labels in it need no transparency
+                // chain through the rounded painting.
+                if (control.Tag == FluentCard.CardTag)
                 {
-                    Panel card = (Panel)control;
-                    card.Tag = border;
-                    card.BorderStyle = BorderStyle.None;
-                    card.Invalidate();
+                    control.BackColor = surface;
+                    control.Invalidate();
+                }
+                else if (control.Tag == FluentCard.BodyTag)
+                {
+                    control.BackColor = _palette.Card;
+                }
+                else
+                {
+                    control.BackColor = Color.Transparent;
                 }
             }
             else if (control is Panel)
             {
                 control.BackColor = surface;
                 control.ForeColor = text;
-                if (control.Tag is Color)
-                {
-                    Panel card = (Panel)control;
-                    card.Tag = border;
-                    card.BorderStyle = BorderStyle.None;
-                    card.Invalidate();
-                }
             }
             else
             {
@@ -2529,6 +2652,30 @@ namespace MacRando
             foreach (Control child in control.Controls)
             {
                 ApplyControlTheme(child, background, surface, input, text, secondary, accent, border, listHeader);
+            }
+        }
+
+        /// <summary>
+        /// Fluent button colours. A disabled primary button drops the accent fill: Windows
+        /// draws disabled text grey, which was unreadable on the accent colour.
+        /// </summary>
+        // Under high contrast the Fluent selection fill can equal the window colour, so the
+        // selected row uses the system Highlight pair, as it did before the redesign.
+        internal static Color SelectedRowFill(bool highContrast, FluentPalette p)
+        {
+            return highContrast ? SystemColors.Highlight : p.Selected;
+        }
+
+        internal static Color SelectedRowText(bool highContrast, FluentPalette p)
+        {
+            return highContrast ? SystemColors.HighlightText : p.Text;
+        }
+
+        private void StyleButton(Button button)
+        {
+            if (!_highContrastActive)
+            {
+                FluentButton.Style(button, _palette);
             }
         }
 
@@ -2633,7 +2780,7 @@ namespace MacRando
         {
             // The page lives inside a scroll host. AutoScroll on a TableLayoutPanel does not
             // clip its children, so without the host the cards below simply draw on top of
-            // the Safety and status card on a short window.
+            // the status line on a short window.
             var page = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
@@ -2648,36 +2795,6 @@ namespace MacRando
             return page;
         }
 
-        private static void AddPageHeading(TableLayoutPanel page, Label title, Label subtitle)
-        {
-            var heading = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                ColumnCount = 1,
-                RowCount = 2,
-                Padding = Padding.Empty,
-                Margin = Padding.Empty,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink
-            };
-            heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            heading.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            heading.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            title.Dock = DockStyle.Top;
-            title.AutoSize = true;
-            title.AutoEllipsis = true;
-            title.TextAlign = ContentAlignment.MiddleLeft;
-            title.Margin = Padding.Empty;
-            subtitle.Dock = DockStyle.Top;
-            subtitle.AutoSize = true;
-            subtitle.AutoEllipsis = true;
-            subtitle.TextAlign = ContentAlignment.MiddleLeft;
-            subtitle.Margin = Padding.Empty;
-            heading.Controls.Add(title, 0, 0);
-            heading.Controls.Add(subtitle, 0, 1);
-            AddPageRow(page, heading);
-        }
-
         private static void AddPageRow(TableLayoutPanel page, Control control)
         {
             int row = page.RowCount++;
@@ -2687,14 +2804,6 @@ namespace MacRando
             page.Controls.Add(control, 0, row);
         }
 
-        private static void AddPageFixedRow(TableLayoutPanel page, Control control, int height)
-        {
-            int row = page.RowCount++;
-            control.Dock = DockStyle.Fill;
-            control.Margin = Padding.Empty;
-            page.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
-            page.Controls.Add(control, 0, row);
-        }
 
         private static TableLayoutPanel CreateBodyLayout(int columns, int rows)
         {
@@ -2806,7 +2915,9 @@ namespace MacRando
 
         private void ConfigureSafetyBody(TableLayoutPanel body)
         {
-            SetBodyRows(body, 28, 24, 65, 38, 38, 38, 38);
+            // The operation status moved to the status line under the pages, and IP preflight
+            // to the Local network page. Dark mode moved here from the old header.
+            SetBodyRows(body, 28, 28, 65, 28, 38, 38);
             _allowDhcpIpCheckBox.AutoSize = false;
             _allowDhcpIpCheckBox.Dock = DockStyle.Fill;
             _allowDhcpIpCheckBox.TextAlign = ContentAlignment.MiddleLeft;
@@ -2818,52 +2929,31 @@ namespace MacRando
             _safetySummaryLabel.Dock = DockStyle.Fill;
             _safetySummaryLabel.TextAlign = ContentAlignment.MiddleLeft;
             _safetySummaryLabel.Margin = Padding.Empty;
-            _operationStatusLabel.Dock = DockStyle.Fill;
-            _operationStatusLabel.TextAlign = ContentAlignment.TopLeft;
-            _operationStatusLabel.Margin = Padding.Empty;
+            _darkModeCheckBox.AutoSize = false;
+            _darkModeCheckBox.Dock = DockStyle.Fill;
+            _darkModeCheckBox.TextAlign = ContentAlignment.MiddleLeft;
+            _darkModeCheckBox.Margin = Padding.Empty;
             _startupRandomizeButton.Dock = DockStyle.Fill;
-            _startupRandomizeButton.Margin = Padding.Empty;
+            _startupRandomizeButton.Margin = new Padding(0, 4, 0, 0);
             _notificationCenterButton.Dock = DockStyle.Fill;
-            _notificationCenterButton.Margin = Padding.Empty;
-            _ipPreflightButton.Dock = DockStyle.Fill;
-            _ipPreflightButton.Margin = Padding.Empty;
+            _notificationCenterButton.Margin = new Padding(0, 4, 0, 0);
             body.Controls.Add(_allowDhcpIpCheckBox, 0, 0);
             body.Controls.Add(_showPublicIpLocationCheckBox, 0, 1);
             body.Controls.Add(_safetySummaryLabel, 0, 2);
-            body.Controls.Add(_operationStatusLabel, 0, 3);
+            body.Controls.Add(_darkModeCheckBox, 0, 3);
             body.Controls.Add(_startupRandomizeButton, 0, 4);
             body.Controls.Add(_notificationCenterButton, 0, 5);
-            body.Controls.Add(_ipPreflightButton, 0, 6);
         }
 
-        private static TableLayoutPanel CreateCard(string title, int bodyColumns, int bodyRows, out TableLayoutPanel body)
+        /// <summary>
+        /// A Fluent card: the card table paints a rounded fill and border, and its title
+        /// and body are solid card colour. The 4px padding keeps the square corners of the
+        /// title and body inside the 8px rounded corner, so nothing has to be transparent.
+        /// </summary>
+        private TableLayoutPanel CreateCard(string title, int bodyColumns, int bodyRows, out TableLayoutPanel body)
         {
-            var card = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                ColumnCount = 1,
-                RowCount = 2,
-                Padding = new Padding(1),
-                Margin = new Padding(0, 0, 0, 12),
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                BorderStyle = BorderStyle.None,
-                Tag = Color.Gray,
-                GrowStyle = TableLayoutPanelGrowStyle.FixedSize
-            };
-            card.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            card.Paint += DrawCardBorder;
             body = CreateBodyLayout(bodyColumns, bodyRows);
-            Label titleLabel = MakeMutedLabel(title.ToUpperInvariant());
-            titleLabel.Font = new Font("Segoe UI Semibold", 8F, FontStyle.Bold, GraphicsUnit.Point);
-            titleLabel.Dock = DockStyle.Fill;
-            titleLabel.Margin = Padding.Empty;
-            titleLabel.TextAlign = ContentAlignment.MiddleLeft;
-            card.Controls.Add(titleLabel, 0, 0);
-            card.Controls.Add(body, 0, 1);
-            return card;
+            return FluentCard.Create(title, body, delegate { return _palette; });
         }
 
         private static void Raise(EventHandler handler)

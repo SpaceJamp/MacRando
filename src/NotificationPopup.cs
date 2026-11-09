@@ -34,8 +34,13 @@ namespace MacRando
         private const int PopupMargin = 12;
         private const int PopupGap = 8;
 
-        private Color _accentColor;
-        private readonly Image _iconImage;
+        private string _severity;
+        private bool _darkMode;
+        private FluentPalette _palette;
+        // Painted, not drawn from the app icon: a filled circle in the severity colour with
+        // a glyph, so the kind of notification reads at a glance. Its name carries the
+        // severity for assistive technology.
+        private readonly Label _severityGlyph;
         private readonly Timer _closeTimer;
         private readonly Label _titleLabel;
         private readonly Label _messageLabel;
@@ -95,15 +100,18 @@ namespace MacRando
             MinimumSize = new Size(360, 100);
             Padding = new Padding(1);
             KeyPreview = true;
-            BackColor = darkMode ? Color.FromArgb(31, 41, 55) : Color.White;
-            ForeColor = darkMode ? Color.White : Color.FromArgb(15, 23, 42);
+            _darkMode = darkMode;
+            _severity = severity;
+            _palette = FluentPalette.Build(Accessibility.ShouldUseHighContrast(), darkMode);
+            BackColor = _palette.Card;
+            ForeColor = _palette.Text;
+            Font = new Font(FluentPalette.BodyFontFamily(), 9F, FontStyle.Regular, GraphicsUnit.Point);
             _timeoutMilliseconds = Math.Max(1000, timeoutMilliseconds);
             _persistent = persistent;
             GroupCount = 1;
             TitleText = title ?? string.Empty;
             MessageText = message ?? string.Empty;
-            _accentColor = GetAccentColor(severity, darkMode);
-            _iconImage = CreateIconImage(icon);
+            _severityGlyph = new Label();
 
             _titleLabel = new Label();
             _messageLabel = new Label();
@@ -125,6 +133,10 @@ namespace MacRando
             _closeTimer = new Timer();
             _closeTimer.Interval = _timeoutMilliseconds;
             _closeTimer.Tick += (sender, args) => Dismiss(false);
+            // The first action is the primary one; see FluentButton.Style.
+            _openButton.Tag = true;
+            StyleButtons();
+            FluentChrome.Apply(this, darkMode && !_palette.IsHighContrast);
             ApplyAccessibility();
             ResumeLayout(false);
             PerformLayout();
@@ -142,9 +154,9 @@ namespace MacRando
         /// retried, and the title and message together form the notification's accessible
         /// text.
         ///
-        /// Order is left to right as the buttons appear visually: Dismiss, Diagnostics,
-        /// Retry, Restore now, Open dashboard, then the close button, which is last
-        /// because it duplicates Dismiss and reaching it first would be a trap.
+        /// Order is left to right as the buttons appear visually: Open dashboard, Restore
+        /// now, Retry, Diagnostics, Dismiss, then the close button, which is last because
+        /// it duplicates Dismiss and reaching it first would be a trap.
         /// </summary>
         private void ApplyAccessibility()
         {
@@ -172,10 +184,13 @@ namespace MacRando
                     "Closes this notification. Nothing is changed by closing it.");
             }
 
+            Accessibility.Describe(_severityGlyph, "Severity: " + NotificationKinds.Normalize(_severity),
+                AccessibleRole.Graphic, null);
+
             var sequence = new Control[]
             {
-                _dismissButton, _diagnosticsButton, _retryButton, _restoreButton,
-                _openButton, _closeButton
+                _openButton, _restoreButton, _retryButton, _diagnosticsButton,
+                _dismissButton, _closeButton
             };
             int index = 0;
             foreach (Control control in sequence)
@@ -220,7 +235,12 @@ namespace MacRando
             {
                 _messageLabel.Text = Truncate(message, 320);
             }
-            _accentColor = GetAccentColor(severity, darkMode);
+            // Only the severity changes here: the popup keeps the theme it was built with,
+            // so its glyph ink must too.
+            _severity = severity;
+            Accessibility.Describe(_severityGlyph, "Severity: " + NotificationKinds.Normalize(_severity),
+                AccessibleRole.Graphic, null);
+            _severityGlyph.Invalidate();
             Invalidate();
         }
 
@@ -348,16 +368,9 @@ namespace MacRando
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            Color borderColor = BackColor == Color.White
-                ? Color.FromArgb(203, 213, 225)
-                : Color.FromArgb(71, 85, 105);
-            using (var pen = new Pen(borderColor))
+            using (var pen = new Pen(_palette.CardBorder))
             {
                 e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
-            }
-            using (var brush = new SolidBrush(_accentColor))
-            {
-                e.Graphics.FillRectangle(brush, 1, 1, 4, Height - 2);
             }
         }
 
@@ -368,10 +381,6 @@ namespace MacRando
                 _disposed = true;
                 _closeTimer.Stop();
                 _closeTimer.Dispose();
-                if (_iconImage != null)
-                {
-                    _iconImage.Dispose();
-                }
             }
             base.Dispose(disposing);
         }
@@ -399,20 +408,16 @@ namespace MacRando
                 BackColor = BackColor,
                 Margin = Padding.Empty
             };
-            content.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52F));
+            content.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 34F));
             content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             content.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 30F));
             content.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
-            var iconBox = new PictureBox
-            {
-                Dock = DockStyle.Fill,
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Image = _iconImage,
-                BackColor = BackColor,
-                Margin = new Padding(0, 1, 10, 0),
-                TabStop = false
-            };
+            _severityGlyph.Size = new Size(22, 22);
+            _severityGlyph.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            _severityGlyph.Margin = new Padding(0, 2, 12, 0);
+            _severityGlyph.BackColor = BackColor;
+            _severityGlyph.Paint += PaintSeverityGlyph;
 
             var textPanel = new TableLayoutPanel
             {
@@ -430,7 +435,7 @@ namespace MacRando
             _titleLabel.Text = Truncate(title, 80);
             _titleLabel.AutoEllipsis = true;
             _titleLabel.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold, GraphicsUnit.Point);
-            _titleLabel.ForeColor = darkMode ? Color.White : Color.FromArgb(15, 23, 42);
+            _titleLabel.ForeColor = _palette.Text;
             _titleLabel.BackColor = BackColor;
             _titleLabel.Margin = Padding.Empty;
             _titleLabel.TextAlign = ContentAlignment.MiddleLeft;
@@ -439,7 +444,7 @@ namespace MacRando
             _messageLabel.Text = Truncate(message, 320);
             _messageLabel.AutoEllipsis = true;
             _messageLabel.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
-            _messageLabel.ForeColor = darkMode ? Color.FromArgb(203, 213, 225) : Color.FromArgb(71, 85, 105);
+            _messageLabel.ForeColor = _palette.TextSecondary;
             _messageLabel.BackColor = BackColor;
             _messageLabel.Margin = new Padding(0, 2, 8, 0);
             textPanel.Controls.Add(_titleLabel, 0, 0);
@@ -451,13 +456,13 @@ namespace MacRando
                 Dock = DockStyle.Fill,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 11F, FontStyle.Regular, GraphicsUnit.Point),
-                ForeColor = darkMode ? Color.FromArgb(203, 213, 225) : Color.FromArgb(71, 85, 105),
+                ForeColor = _palette.TextSecondary,
                 BackColor = BackColor,
                 Margin = new Padding(3, 0, 0, 0),
                 TabStop = true
             };
             closeButton.FlatAppearance.BorderSize = 0;
-            closeButton.FlatAppearance.MouseOverBackColor = darkMode ? Color.FromArgb(55, 65, 81) : Color.FromArgb(241, 245, 249);
+            closeButton.FlatAppearance.MouseOverBackColor = _palette.Selected;
             closeButton.Click += (sender, args) => TriggerAction(NotificationPopupAction.Dismiss);
             _closeButton = closeButton;
 
@@ -499,25 +504,26 @@ namespace MacRando
                 textPanel.BackColor = SystemColors.Window;
             }
 
-            content.Controls.Add(iconBox, 0, 0);
+            content.Controls.Add(_severityGlyph, 0, 0);
             content.Controls.Add(textPanel, 1, 0);
             content.Controls.Add(closeButton, 2, 0);
             layout.Controls.Add(content, 0, 0);
 
             _actionsPanel.Dock = DockStyle.Fill;
-            _actionsPanel.FlowDirection = FlowDirection.RightToLeft;
+            // Left to right in reading order, the primary action first.
+            _actionsPanel.FlowDirection = FlowDirection.LeftToRight;
             _actionsPanel.WrapContents = true;
             _actionsPanel.BackColor = BackColor;
             _actionsPanel.Margin = Padding.Empty;
             _actionsPanel.Padding = new Padding(0, 4, 0, 2);
-            _actionsPanel.Controls.Add(_dismissButton);
-            _actionsPanel.Controls.Add(_diagnosticsButton);
-            _actionsPanel.Controls.Add(_retryButton);
-            _actionsPanel.Controls.Add(_restoreButton);
             _actionsPanel.Controls.Add(_openButton);
+            _actionsPanel.Controls.Add(_restoreButton);
+            _actionsPanel.Controls.Add(_retryButton);
+            _actionsPanel.Controls.Add(_diagnosticsButton);
+            _actionsPanel.Controls.Add(_dismissButton);
             layout.Controls.Add(_actionsPanel, 0, 1);
 
-            iconBox.Click += BodyClick;
+            _severityGlyph.Click += BodyClick;
             _titleLabel.Click += BodyClick;
             _messageLabel.Click += BodyClick;
             textPanel.Click += BodyClick;
@@ -535,9 +541,7 @@ namespace MacRando
                 MinimumSize = new Size(64, 28),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 8.5F, FontStyle.Regular, GraphicsUnit.Point),
-                BackColor = BackColor,
-                ForeColor = ForeColor,
-                Margin = new Padding(4, 0, 0, 0),
+                Margin = new Padding(0, 0, 6, 0),
                 TabStop = true
             };
         }
@@ -655,36 +659,58 @@ namespace MacRando
             }
         }
 
-        private static Image CreateIconImage(Icon icon)
+        private void StyleButtons()
         {
-            Icon source = icon == null
-                ? (Icon)SystemIcons.Application.Clone()
-                : (Icon)icon.Clone();
-            using (source)
+            if (_palette.IsHighContrast)
             {
-                using (Bitmap bitmap = source.ToBitmap())
-                {
-                    return new Bitmap(bitmap);
-                }
+                return;
+            }
+            foreach (Button button in new[] { _openButton, _restoreButton, _retryButton, _diagnosticsButton, _dismissButton })
+            {
+                FluentButton.Style(button, _palette);
             }
         }
 
-        private static Color GetAccentColor(string severity, bool darkMode)
+        private void PaintSeverityGlyph(object sender, PaintEventArgs e)
         {
-            string normalized = NotificationKinds.Normalize(severity);
+            string normalized = NotificationKinds.Normalize(_severity);
+            Color fill;
+            string glyph;
             if (normalized == NotificationKinds.Critical || normalized == NotificationKinds.Error)
             {
-                return darkMode ? Color.FromArgb(248, 113, 113) : Color.FromArgb(220, 38, 38);
+                fill = _palette.Error;
+                glyph = "\u00D7";
             }
-            if (normalized == NotificationKinds.Warning)
+            else if (normalized == NotificationKinds.Warning)
             {
-                return darkMode ? Color.FromArgb(251, 191, 36) : Color.FromArgb(217, 119, 6);
+                fill = _palette.Warning;
+                glyph = "!";
             }
-            if (normalized == NotificationKinds.Success)
+            else if (normalized == NotificationKinds.Success)
             {
-                return darkMode ? Color.FromArgb(74, 222, 128) : Color.FromArgb(22, 163, 74);
+                fill = _palette.Success;
+                glyph = "\u2713";
             }
-            return darkMode ? Color.FromArgb(96, 165, 250) : Color.FromArgb(37, 99, 235);
+            else
+            {
+                fill = _palette.Accent;
+                glyph = "i";
+            }
+            // The light palette's status colours are dark and the dark palette's are light,
+            // so the glyph is white on light and black on dark. Under high contrast the
+            // fill is the text colour and the glyph the window colour.
+            Color ink = _palette.IsHighContrast ? SystemColors.Window : (_darkMode ? Color.Black : Color.White);
+            Rectangle circle = new Rectangle(0, 0, _severityGlyph.Width - 1, _severityGlyph.Width - 1);
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var brush = new SolidBrush(fill))
+            {
+                e.Graphics.FillEllipse(brush, circle);
+            }
+            using (var font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold, GraphicsUnit.Point))
+            {
+                TextRenderer.DrawText(e.Graphics, glyph, font, circle, ink,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
         }
 
         private static string ToSeverity(ToolTipIcon notificationType)

@@ -34,6 +34,15 @@ internal static class LayoutTests
     {
         try
         {
+            EveryOldControlIsOnAPage();
+            TheStatusLineIsVisibleOnEveryPage();
+            ThePendingBannerShowsItsWholeMessage();
+            EveryTabIsOnScreen();
+            DisabledPrimaryButtonsAreNotAccentFilled();
+            CenterNothingOverlaps();
+            ALongStatusShowsTwoLines();
+            ActionGridsFitWiderText();
+            PagesFitASmallScreenAtHighScaling();
             NothingOverlapsAtAnySize();
             NoLabelIsShorterThanItsText();
             NoControlIsClippedAtAnySize();
@@ -523,6 +532,387 @@ internal static class LayoutTests
         return problems;
     }
 
+    private static readonly string[] DashboardPages =
+    {
+        "MAC address", "Local network", "Public IP and VPN", "Adapter details", "Safety and settings"
+    };
+
+    /// <summary>
+    /// Sizes every page is checked at. The full Sizes() list runs on the default page; the
+    /// other pages get the minimum, default and two large windows, since sizes under the
+    /// 980x620 minimum are clamped to it anyway.
+    /// </summary>
+    private static readonly Size[] PageSizes =
+    {
+        new Size(980, 620), new Size(1120, 720), new Size(1440, 900), new Size(1920, 900)
+    };
+
+    private static PivotBar DashboardPivot(DashboardForm form)
+    {
+        FieldInfo field = typeof(DashboardForm).GetField("_pivot", BindingFlags.Instance | BindingFlags.NonPublic);
+        Check(field != null, "the dashboard has no _pivot tab strip");
+        return (PivotBar)field.GetValue(form);
+    }
+
+    private static Control DashboardField(DashboardForm form, string name)
+    {
+        FieldInfo field = typeof(DashboardForm).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
+        Check(field != null, "the dashboard has no field " + name);
+        return (Control)field.GetValue(form);
+    }
+
+    /// <summary>
+    /// Moving controls onto tabbed pages must not lose any of them. Each control that was on
+    /// the dashboard before the redesign has to be on screen on at least one page, at the
+    /// default window size, so nothing became unreachable by being put on a page that does
+    /// not show it or below a fold nobody scrolls to.
+    /// </summary>
+    private static void EveryOldControlIsOnAPage()
+    {
+        string[] names =
+        {
+            "_randomizeMacButton", "_applyMacButton", "_randomizeBothButton", "_restorePermanentButton",
+            "_restoreButton", "_macTextBox", "_presetCombo", "_savePresetButton", "_applyPresetButton",
+            "_dnsCombo", "_applyDnsButton", "_randomizeIpButton", "_ipPreflightButton", "_vpnCombo",
+            "_connectVpnButton", "_disconnectVpnButton", "_driverLabel", "_guidLabel",
+            "_allowDhcpIpCheckBox", "_showPublicIpLocationCheckBox", "_darkModeCheckBox",
+            "_startupRandomizeButton", "_notificationCenterButton", "_safetySummaryLabel"
+        };
+        RunOnUiThread(delegate
+        {
+            using (DashboardForm form = new DashboardForm())
+            {
+                Populate(form);
+                form.Size = new Size(1120, 720);
+                Settle(form);
+                PivotBar pivot = DashboardPivot(form);
+                Check(pivot.TabCount == DashboardPages.Length,
+                    "the dashboard should have " + DashboardPages.Length + " pages, has " + pivot.TabCount);
+                var seen = new HashSet<string>();
+                for (int page = 0; page < pivot.TabCount; page++)
+                {
+                    Check(pivot.TabButton(page).Text == DashboardPages[page],
+                        "page " + page + " should be \"" + DashboardPages[page] + "\", is \"" + pivot.TabButton(page).Text + "\"");
+                    pivot.SelectedIndex = page;
+                    Settle(form);
+                    foreach (string name in names)
+                    {
+                        Control c = DashboardField(form, name);
+                        Rectangle v = Visible(c, form);
+                        if (c.Visible && v.Width > 0 && v.Height > 0)
+                        {
+                            seen.Add(name);
+                        }
+                    }
+                }
+                foreach (string name in names)
+                {
+                    Check(seen.Contains(name), name + " is not on screen on any dashboard page at 1120x720");
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// The operation status reports what the last change did. It used to sit in a card
+    /// that was always shown; with pages, a result posted while another page is open must
+    /// still be readable, so the status line is outside the pages and visible on all of them.
+    /// </summary>
+    private static void TheStatusLineIsVisibleOnEveryPage()
+    {
+        RunOnUiThread(delegate
+        {
+            using (DashboardForm form = new DashboardForm())
+            {
+                Populate(form);
+                form.Size = new Size(980, 620);
+                Settle(form);
+                PivotBar pivot = DashboardPivot(form);
+                Control status = DashboardField(form, "_operationStatusLabel");
+                for (int page = 0; page < pivot.TabCount; page++)
+                {
+                    pivot.SelectedIndex = page;
+                    Settle(form);
+                    Rectangle v = Visible(status, form);
+                    Check(status.Visible && v.Width > 0 && v.Height > 0,
+                        "the operation status is not visible on the \"" + DashboardPages[page] + "\" page at 980x620");
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// The banner's message wraps in the narrower content column. Found in a real 150%
+    /// render: the label wrapped to more lines than its row allowed and the end of the
+    /// sentence was cut off.
+    /// </summary>
+    private static void ThePendingBannerShowsItsWholeMessage()
+    {
+        RunOnUiThread(delegate
+        {
+            foreach (float scale in new[] { 1.0f, 1.5f })
+            {
+                using (DashboardForm form = new DashboardForm())
+                {
+                    Populate(form);
+                    form.Size = new Size(980, 620);
+                    Settle(form);
+                    if (scale != 1.0f)
+                    {
+                        form.Scale(new SizeF(scale, scale));
+                        Settle(form);
+                    }
+                    Label label = (Label)DashboardField(form, "_pendingBannerLabel");
+                    Control banner = DashboardField(form, "_pendingBanner");
+                    Size needed = TextRenderer.MeasureText(label.Text, label.Font,
+                        new Size(label.Width, int.MaxValue), TextFormatFlags.WordBreak);
+                    Rectangle v = Visible(label, form);
+                    Check(v.Height >= needed.Height,
+                        "the pending banner shows " + v.Height + "px of a message that needs " + needed.Height +
+                        "px at 980x620 scaled " + scale + "x");
+                    Check(Abs(label, form).Right <= Abs(banner, form).Right,
+                        "the pending banner message runs past the banner at 980x620 scaled " + scale + "x");
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Every tab of the dashboard's tab strip is fully on screen. Found in a real 150%
+    /// render: the strip did not wrap and "Safety and settings" was cut off the end.
+    /// </summary>
+    private static void EveryTabIsOnScreen()
+    {
+        RunOnUiThread(delegate
+        {
+            foreach (float scale in new[] { 1.0f, 1.5f, 2.0f })
+            {
+                using (DashboardForm form = new DashboardForm())
+                {
+                    Populate(form);
+                    form.Size = new Size(980, 620);
+                    Settle(form);
+                    if (scale != 1.0f)
+                    {
+                        form.Scale(new SizeF(scale, scale));
+                        Settle(form);
+                    }
+                    PivotBar pivot = DashboardPivot(form);
+                    for (int i = 0; i < pivot.TabCount; i++)
+                    {
+                        Button tab = pivot.TabButton(i);
+                        Rectangle v = Visible(tab, form);
+                        Check(v.Width == tab.Width && v.Height == tab.Height,
+                            "the \"" + tab.Text + "\" tab is cut to " + v.Width + "x" + v.Height + " of " +
+                            tab.Width + "x" + tab.Height + " at 980x620 scaled " + scale + "x");
+                    }
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// A disabled primary button must not keep the accent fill: Windows draws its text grey,
+    /// which a real render showed was unreadable on the accent colour.
+    /// </summary>
+    private static void DisabledPrimaryButtonsAreNotAccentFilled()
+    {
+        RunOnUiThread(delegate
+        {
+            foreach (bool dark in new[] { false, true })
+            {
+                using (DashboardForm form = new DashboardForm())
+                {
+                    ((CheckBox)DashboardField(form, "_darkModeCheckBox")).Checked = dark;
+                    Settle(form);
+                    if (SystemInformation.HighContrast)
+                    {
+                        continue;
+                    }
+                    FluentPalette palette = FluentPalette.Build(false, dark);
+                    // No adapter is selected, so the adapter actions are disabled.
+                    Button randomize = (Button)DashboardField(form, "_randomizeMacButton");
+                    Check(!randomize.Enabled, "Random MAC should be disabled with no adapter selected");
+                    Check(randomize.BackColor.ToArgb() != palette.Accent.ToArgb(),
+                        "the disabled Random MAC button is still accent filled (" + (dark ? "dark" : "light") + ")");
+                    Populate(form);
+                    Settle(form);
+                    if (randomize.Enabled)
+                    {
+                        Check(randomize.BackColor.ToArgb() == palette.Accent.ToArgb(),
+                            "the enabled Random MAC button lost its accent fill (" + (dark ? "dark" : "light") + ")");
+                    }
+                    ComboBox dns = (ComboBox)DashboardField(form, "_dnsCombo");
+                    Check(dns.FlatStyle == FlatStyle.Flat,
+                        "the DNS combo must be flat so it takes the theme colour (" + (dark ? "dark" : "light") + ")");
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// The notification center's two tabs, at its minimum, default and a large size, light
+    /// and dark, and scaled to 150%: no two controls may overlap.
+    /// </summary>
+    private static void CenterNothingOverlaps()
+    {
+        RunOnUiThread(delegate
+        {
+            var entries = new List<NotificationHistoryEntry>
+            {
+                new NotificationHistoryEntry
+                {
+                    NotificationId = "o-1", TimestampUtc = DateTime.UtcNow, Title = "Restore needs attention",
+                    Message = "The saved configuration could not be restored.", Severity = NotificationKinds.Critical,
+                    AdapterKey = "{guid}", Action = "Retry", CanRetry = true
+                }
+            };
+            foreach (bool dark in new[] { false, true })
+            {
+                foreach (float scale in new[] { 1.0f, 1.5f })
+                {
+                    foreach (Size size in new[] { new Size(760, 500), new Size(976, 679), new Size(1280, 800) })
+                    {
+                        using (var center = new NotificationCenterForm(new AppSettings(), entries, dark))
+                        {
+                            center.Size = size;
+                            Settle(center);
+                            if (scale != 1.0f)
+                            {
+                                center.Scale(new SizeF(scale, scale));
+                                Settle(center);
+                            }
+                            FieldInfo field = typeof(NotificationCenterForm).GetField("_pivot", BindingFlags.Instance | BindingFlags.NonPublic);
+                            Check(field != null, "the notification center has no _pivot tab strip");
+                            PivotBar pivot = (PivotBar)field.GetValue(center);
+                            for (int page = 0; page < pivot.TabCount; page++)
+                            {
+                                pivot.SelectedIndex = page;
+                                Settle(center);
+                                List<string> problems = FindOverlaps(center);
+                                Check(problems.Count == 0,
+                                    "notification center overlap on the \"" + pivot.TabButton(page).Text + "\" tab at " +
+                                    size.Width + "x" + size.Height + " scaled " + scale + "x (" + (dark ? "dark" : "light") + "): " +
+                                    (problems.Count == 0 ? "" : problems[0]));
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Failure messages in the status line run past one line at the minimum window width.
+    /// The line must be tall enough for two lines of its text, so most of the message is
+    /// read without the tooltip.
+    /// </summary>
+    private static void ALongStatusShowsTwoLines()
+    {
+        RunOnUiThread(delegate
+        {
+            using (DashboardForm form = new DashboardForm())
+            {
+                Populate(form);
+                form.Size = new Size(980, 620);
+                form.SetStatus("MAC change failed on Ethernet: the driver rejected the NetworkAddress value and " +
+                    "the adapter was restored to its saved configuration. See diagnostics for details.");
+                Settle(form);
+                Label status = (Label)DashboardField(form, "_operationStatusLabel");
+                int line = TextRenderer.MeasureText("Ag", status.Font).Height;
+                Check(status.Height >= 2 * line,
+                    "the status line is " + status.Height + "px, two lines of its text need " + (2 * line) + "px");
+            }
+        });
+    }
+
+    /// <summary>
+    /// On CI "Randomize local IP" (255px minimum at 1.5x) got a 234px cell and ran over
+    /// "Apply DNS": the action grid checked that each row's total fitted, but its columns
+    /// are equal width, so one wide button overflows its own cell. Forced here with a wide
+    /// minimum size.
+    /// </summary>
+    private static void ActionGridsFitWiderText()
+    {
+        RunOnUiThread(delegate
+        {
+            using (DashboardForm form = new DashboardForm())
+            {
+                Populate(form);
+                Button randomizeIp = (Button)DashboardField(form, "_randomizeIpButton");
+                // Columns are equal width, so one wide button must drop the grid to fewer
+                // columns even when its row's total would fit.
+                randomizeIp.MinimumSize = new Size(300, randomizeIp.MinimumSize.Height);
+                form.Size = new Size(900, 620);
+                Settle(form);
+                form.Scale(new SizeF(1.5f, 1.5f));
+                Settle(form);
+                DashboardPivot(form).SelectedIndex = 1;
+                Settle(form);
+                List<string> problems = FindOverlaps(form);
+                Check(problems.Count == 0,
+                    "an action button wider than its minimum size overlaps its neighbour: " +
+                    (problems.Count == 0 ? "" : problems[0]));
+            }
+        });
+    }
+
+    /// <summary>
+    /// Windows caps a window at the screen's size, so on a small screen a highly scaled
+    /// dashboard gets big fonts in a small window. CI's runner (a 1024x768 screen) showed
+    /// overlaps that a large desktop never does; the cap is applied here with MaximumSize
+    /// so the case runs everywhere.
+    /// </summary>
+    private static void PagesFitASmallScreenAtHighScaling()
+    {
+        RunOnUiThread(delegate
+        {
+            foreach (float scale in new[] { 1.5f, 2.0f })
+            {
+                using (DashboardForm form = new DashboardForm())
+                {
+                    Populate(form);
+                    form.Size = new Size(900, 620);
+                    Settle(form);
+                    form.Scale(new SizeF(scale, scale));
+                    form.MinimumSize = Size.Empty;
+                    form.MaximumSize = new Size(1024, 768);
+                    Settle(form);
+                    PivotBar pivot = DashboardPivot(form);
+                    for (int page = 0; page < pivot.TabCount; page++)
+                    {
+                        pivot.SelectedIndex = page;
+                        Settle(form);
+                        List<string> problems = FindOverlaps(form);
+                        Check(problems.Count == 0,
+                            "overlap on the \"" + DashboardPages[page] + "\" page in a 1024x768 window scaled " + scale +
+                            "x: " + (problems.Count == 0 ? "" : problems[0]));
+                    }
+                }
+                using (var center = new NotificationCenterForm(new AppSettings(), new List<NotificationHistoryEntry>(), false))
+                {
+                    center.Size = new Size(760, 500);
+                    Settle(center);
+                    center.Scale(new SizeF(scale, scale));
+                    center.MinimumSize = Size.Empty;
+                    center.MaximumSize = new Size(1024, 768);
+                    Settle(center);
+                    PivotBar pivot = (PivotBar)typeof(NotificationCenterForm)
+                        .GetField("_pivot", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(center);
+                    for (int page = 0; page < pivot.TabCount; page++)
+                    {
+                        pivot.SelectedIndex = page;
+                        Settle(center);
+                        List<string> problems = FindOverlaps(center);
+                        Check(problems.Count == 0,
+                            "notification center overlap on the \"" + pivot.TabButton(page).Text + "\" tab in a 1024x768 window scaled " +
+                            scale + "x: " + (problems.Count == 0 ? "" : problems[0]));
+                    }
+                }
+            }
+        });
+    }
+
     private static void NothingOverlapsAtAnySize()
     {
         RunOnUiThread(delegate
@@ -547,6 +937,22 @@ internal static class LayoutTests
                             "overlap at " + size.Width + "x" + size.Height + " (" + (dark ? "dark" : "light") + "): " +
                             (problems.Count == 0 ? "" : problems[0]));
                     }
+
+                    PivotBar pivot = DashboardPivot(form);
+                    for (int page = 0; page < pivot.TabCount; page++)
+                    {
+                        pivot.SelectedIndex = page;
+                        foreach (Size size in PageSizes)
+                        {
+                            form.Size = size;
+                            Settle(form);
+                            List<string> problems = FindOverlaps(form);
+                            Check(problems.Count == 0,
+                                "overlap on the \"" + DashboardPages[page] + "\" page at " + size.Width + "x" + size.Height +
+                                " (" + (dark ? "dark" : "light") + "): " + (problems.Count == 0 ? "" : problems[0]));
+                        }
+                    }
+                    pivot.SelectedIndex = 0;
                 }
             }
         });
@@ -645,10 +1051,16 @@ internal static class LayoutTests
                         form.Scale(new SizeF(scale, scale));
                         Settle(form);
 
-                        List<string> problems = FindOverlaps(form);
-                        Check(problems.Count == 0,
-                            "overlap at " + size.Width + "x" + size.Height + " scaled " + scale + "x: " +
-                            (problems.Count == 0 ? "" : problems[0]));
+                        PivotBar pivot = DashboardPivot(form);
+                        for (int page = 0; page < pivot.TabCount; page++)
+                        {
+                            pivot.SelectedIndex = page;
+                            Settle(form);
+                            List<string> problems = FindOverlaps(form);
+                            Check(problems.Count == 0,
+                                "overlap on the \"" + DashboardPages[page] + "\" page at " + size.Width + "x" + size.Height +
+                                " scaled " + scale + "x: " + (problems.Count == 0 ? "" : problems[0]));
+                        }
                     }
                 }
             }
@@ -674,24 +1086,41 @@ internal static class LayoutTests
                     {
                         form.Size = size;
                         Settle(form);
-                        foreach (Control c in AllControls(form))
+                        CheckNothingOutsideTheForm(form, size.Width + "x" + size.Height + " (" + (dark ? "dark" : "light") + ")");
+                    }
+
+                    PivotBar pivot = DashboardPivot(form);
+                    for (int page = 0; page < pivot.TabCount; page++)
+                    {
+                        pivot.SelectedIndex = page;
+                        foreach (Size size in PageSizes)
                         {
-                            if (!c.Visible || c is Form || c is ListView) continue;
-                            Rectangle v = Visible(c, form);
-                            if (v.Width == 0 && v.Height == 0) continue;
-                            // A control should never be entirely outside the form bounds.
-                            if (v.Right <= 0 || v.Bottom <= 0 || v.Left >= form.Width || v.Top >= form.Height)
-                            {
-                                Check(false,
-                                    "control \"" + c.Name + "\" (\"" + c.Text + "\") is entirely outside the " +
-                                    "form bounds at " + size.Width + "x" + size.Height + " (" +
-                                    (dark ? "dark" : "light") + ")");
-                            }
+                            form.Size = size;
+                            Settle(form);
+                            CheckNothingOutsideTheForm(form, "the \"" + DashboardPages[page] + "\" page at " +
+                                size.Width + "x" + size.Height + " (" + (dark ? "dark" : "light") + ")");
                         }
                     }
+                    pivot.SelectedIndex = 0;
                 }
             }
         });
+    }
+
+    private static void CheckNothingOutsideTheForm(Form form, string where)
+    {
+        foreach (Control c in AllControls(form))
+        {
+            if (!c.Visible || c is Form || c is ListView) continue;
+            Rectangle v = Visible(c, form);
+            if (v.Width == 0 && v.Height == 0) continue;
+            // A control should never be entirely outside the form bounds.
+            if (v.Right <= 0 || v.Bottom <= 0 || v.Left >= form.Width || v.Top >= form.Height)
+            {
+                Check(false,
+                    "control \"" + c.Name + "\" (\"" + c.Text + "\") is entirely outside the form bounds at " + where);
+            }
+        }
     }
 
     /// <summary>
@@ -872,22 +1301,29 @@ internal static class LayoutTests
                         });
                         Settle(form);
 
-                        foreach (Control c in AllControls(form))
+                        PivotBar pivot = DashboardPivot(form);
+                        for (int page = 0; page < pivot.TabCount; page++)
                         {
-                            Label label = c as Label;
-                            if (label == null || !label.Visible)
+                            pivot.SelectedIndex = page;
+                            Settle(form);
+                            foreach (Control c in AllControls(form))
                             {
-                                continue;
+                                Label label = c as Label;
+                                if (label == null || !label.Visible)
+                                {
+                                    continue;
+                                }
+                                if (string.IsNullOrEmpty(label.Text))
+                                {
+                                    continue;
+                                }
+                                int needed = label.PreferredHeight;
+                                Check(label.Height >= needed,
+                                    "the label \"" + Shorten(label.Text) + "\" is " + label.Height
+                                        + "px tall but needs " + needed + "px to draw its text, on the \""
+                                        + DashboardPages[page] + "\" page at "
+                                        + size.Width + "x" + size.Height + " scaled " + scale + "x");
                             }
-                            if (string.IsNullOrEmpty(label.Text))
-                            {
-                                continue;
-                            }
-                            int needed = label.PreferredHeight;
-                            Check(label.Height >= needed,
-                                "the label \"" + Shorten(label.Text) + "\" is " + label.Height
-                                    + "px tall but needs " + needed + "px to draw its text, at "
-                                    + size.Width + "x" + size.Height + " scaled " + scale + "x");
                         }
                     }
                 }

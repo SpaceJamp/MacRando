@@ -49,10 +49,33 @@ namespace MacRando
             }
 
             Rectangle bounds = ItemBounds(e.Item);
-            using (SolidBrush brush = new SolidBrush(
-                e.Item.Selected && e.Item.Enabled ? _palette.Selection : _palette.Surface))
+            using (SolidBrush brush = new SolidBrush(_palette.Surface))
             {
                 e.Graphics.FillRectangle(brush, bounds);
+            }
+            if (e.Item.Selected && e.Item.Enabled)
+            {
+                // Fluent's highlight: a rounded rectangle inset from the menu's edges, so
+                // the surface shows around it.
+                float scale = e.Graphics.DpiY / 96F;
+                int inset = Math.Max(1, (int)Math.Round(4 * scale));
+                int diameter = Math.Max(2, (int)Math.Round(8 * scale));
+                Rectangle r = new Rectangle(bounds.Left + inset, bounds.Top + 1,
+                    bounds.Width - 2 * inset - 1, bounds.Height - 3);
+                if (r.Width > diameter && r.Height > diameter)
+                {
+                    using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+                    using (SolidBrush highlight = new SolidBrush(_palette.Selection))
+                    {
+                        path.AddArc(r.Left, r.Top, diameter, diameter, 180, 90);
+                        path.AddArc(r.Right - diameter, r.Top, diameter, diameter, 270, 90);
+                        path.AddArc(r.Right - diameter, r.Bottom - diameter, diameter, diameter, 0, 90);
+                        path.AddArc(r.Left, r.Bottom - diameter, diameter, diameter, 90, 90);
+                        path.CloseFigure();
+                        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                        e.Graphics.FillPath(highlight, path);
+                    }
+                }
             }
 
             // A section header is disabled, so it never highlights, but it is drawn with a
@@ -180,27 +203,15 @@ namespace MacRando
                 };
             }
 
-            if (!darkMode)
-            {
-                return new TrayPalette
-                {
-                    Surface = Color.White,
-                    Selection = Color.FromArgb(219, 234, 254),
-                    Text = Color.FromArgb(30, 41, 59),
-                    TextMuted = Color.FromArgb(100, 116, 139),
-                    Border = Color.FromArgb(203, 213, 225),
-                    ImageMargin = Color.White
-                };
-            }
-
+            FluentPalette fluent = FluentPalette.Build(false, darkMode);
             return new TrayPalette
             {
-                Surface = Color.FromArgb(30, 41, 59),
-                Selection = Color.FromArgb(51, 65, 85),
-                Text = Color.FromArgb(226, 232, 240),
-                TextMuted = Color.FromArgb(148, 163, 184),
-                Border = Color.FromArgb(71, 85, 105),
-                ImageMargin = Color.FromArgb(30, 41, 59)
+                Surface = fluent.Card,
+                Selection = fluent.Selected,
+                Text = fluent.Text,
+                TextMuted = fluent.TextSecondary,
+                Border = fluent.CardBorder,
+                ImageMargin = fluent.Card
             };
         }
     }
@@ -247,6 +258,11 @@ namespace MacRando
         /// </summary>
         public static void Apply(ToolStrip menu, bool darkMode)
         {
+            Apply(menu, darkMode, Screen.PrimaryScreen.WorkingArea.Height);
+        }
+
+        internal static void Apply(ToolStrip menu, bool darkMode, int workAreaHeight)
+        {
             if (menu == null)
             {
                 return;
@@ -268,18 +284,90 @@ namespace MacRando
             // carries its own colour and it overrides what the renderer paints. A disabled
             // item is a section header, which the renderer already dims; setting the
             // renderer colour for those would undo it.
+            int rowHeight = (int)Math.Round(30 * SystemScale());
             foreach (ToolStripItem item in menu.Items)
             {
-                ApplyToItem(item, palette);
+                ApplyToItem(item, palette, rowHeight);
+            }
+            // At 30px rows the 29-row menu outgrows a 1080p screen at 150%, hiding Exit behind
+            // scroll arrows, so rows shrink by the overflow (never below their natural height).
+            int overflow = menu.GetPreferredSize(Size.Empty).Height - workAreaHeight;
+            if (overflow > 0)
+            {
+                int rows = 0;
+                foreach (ToolStripItem item in menu.Items)
+                {
+                    if (!(item is ToolStripSeparator))
+                    {
+                        rows++;
+                    }
+                }
+                int smaller = rowHeight - (overflow + rows - 1) / Math.Max(1, rows);
+                foreach (ToolStripItem item in menu.Items)
+                {
+                    SetRowHeight(item, smaller);
+                }
+            }
+            RoundCorners(menu);
+        }
+
+        /// <summary>
+        /// The system DPI scale. A ToolStrip is not display-scaled the way a form is, and
+        /// DeviceDpi reports 96 in this app, so it is read from the screen.
+        /// </summary>
+        private static float SystemScale()
+        {
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                return g.DpiY / 96F;
             }
         }
 
-        private static void ApplyToItem(ToolStripItem item, TrayPalette palette)
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ToolStrip, object> Rounded =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<ToolStrip, object>();
+
+        /// <summary>
+        /// Windows 11 rounded corners on the menu window, applied once per strip when its
+        /// window exists. Theme changes call Apply again, hence the guard.
+        /// </summary>
+        private static void RoundCorners(ToolStrip strip)
+        {
+            object marker;
+            if (strip == null || Rounded.TryGetValue(strip, out marker))
+            {
+                return;
+            }
+            Rounded.Add(strip, new object());
+            if (strip.IsHandleCreated)
+            {
+                FluentChrome.Apply(strip.Handle, false);
+            }
+            strip.HandleCreated += delegate { FluentChrome.Apply(strip.Handle, false); };
+        }
+
+        /// <summary>
+        /// Fluent menu rows are 30px at 100%. The row height comes from the item's own
+        /// preferred height, so only the padding that makes up the difference is added.
+        /// </summary>
+        private static void SetRowHeight(ToolStripItem item, int rowHeight)
+        {
+            if (item is ToolStripSeparator)
+            {
+                return;
+            }
+            item.Padding = new Padding(item.Padding.Left, 0, item.Padding.Right, 0);
+            int natural = item.GetPreferredSize(Size.Empty).Height;
+            int extra = Math.Max(0, rowHeight - natural);
+            item.Padding = new Padding(item.Padding.Left, extra / 2, item.Padding.Right, extra - extra / 2);
+        }
+
+        private static void ApplyToItem(ToolStripItem item, TrayPalette palette, int rowHeight)
         {
             if (item == null)
             {
                 return;
             }
+            SetRowHeight(item, rowHeight);
 
             if (item.Enabled)
             {
@@ -294,9 +382,10 @@ namespace MacRando
             {
                 ToolStripDropDownItem dropDown = (ToolStripDropDownItem)item;
                 dropDown.DropDown.BackColor = palette.Surface;
+                RoundCorners(dropDown.DropDown);
                 foreach (ToolStripItem child in dropDown.DropDownItems)
                 {
-                    ApplyToItem(child, palette);
+                    ApplyToItem(child, palette, rowHeight);
                 }
             }
         }
