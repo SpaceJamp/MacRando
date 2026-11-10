@@ -11,25 +11,26 @@ For purposes of this license:
 - "Software" means the original program in source or compiled form, together with its documentation, assets, and associated files, as distributed by the Author under this license, and any portion of any of them.
 - "Author" means SpaceJamp, the original copyright holder, and the Author's heirs, successors, and assigns.
 - "You" means the individual exercising rights under this license. You may not exercise these rights on behalf of, or for the benefit of, any employer, client, or organization.
-- "Modified Version" means any work that changes, adapts, translates, extends, or is derived from the Software, in whole or in part, to the extent that work would require the Author's permission under copyright law.
-- "Distribute" means to make the Software or a Modified Version available to any other person by any means, including hosting, uploading, publishing, streaming, or transferring copies. Use only on your own devices, with no copy made available to anyone else, is not distribution.
+- "Modified Version" means any work that changes, adapts, translates, ports, extends, or is derived from the Software, in whole or in part, to the extent that work would require the Author's permission under copyright law. A work produced from the Software by automated means, including AI tools, code converters, or decompilers, is a Modified Version if it would otherwise meet this definition. Any larger work that incorporates the Software or a Modified Version, in whole or in part, is treated as a Modified Version for purposes of Sections 3, 4, and 5.
+- "Distribute" means to make the Software or a Modified Version, or its functionality, available to any other person by any means, including hosting, uploading, publishing, streaming, transferring copies, or letting others interact with it over a network. Use only on your own devices, with no copy or functionality made available to anyone else, is not distribution.
 - "Source Code" means the preferred form of a work for making modifications to it, including all files, scripts, assets, and build instructions needed to modify and run it.
 - "Personal Use" means use by an individual for private, hobby, self-study, or personal research purposes that is not Commercial Use.
 - "Commercial Use" means any use intended for or directed toward commercial advantage or monetary compensation, whether direct or indirect, including:
   (a) selling, renting, leasing, licensing, or charging fees for the Software or any Modified Version;
   (b) using the Software in, or to support, any product or service offered for payment;
   (c) using the Software in the operations of any business, government body, or other organization;
-  (d) using the Software to generate revenue, including through paid access, subscriptions, advertising You control, sponsorships, donations or tips tied to access or features, in-app purchases, or the sale of any digital goods or services; and
+  (d) using the Software to generate revenue, including through paid access, subscriptions, advertising You control, sponsorships, donations or tips requested in connection with the Software, in-app purchases, or the sale of any digital goods or services; and
   (e) performing paid work, freelance work, or commissions that use or deliver the Software or any Modified Version.
 - "Written" or "in writing" means a document signed by the Author, or an email sent by the Author from the address listed in the Contact section, that expressly refers to this license and grants the permission in question. Silence, inaction, or informal comments are not written permission.
-- In this license, "including" means "including without limitation." Headings are for convenience only and do not affect interpretation.
+- "Free of charge" means without requiring any payment, purchase, subscription, membership, or other consideration, and without bundling the Software with anything offered for payment.
+- In this license, "including" means "including without limitation." Headings are for convenience only and do not affect interpretation. No provision of this license shall be interpreted against the Author because the Author drafted it.
 
 ## 2. License Grant
 
 Subject to, and conditioned on, your full compliance with every term of this license, the Author grants You a worldwide, royalty-free, non-exclusive, non-transferable, non-sublicensable license, revocable only as stated in Section 8, to:
 
 - Download, install, and use the Software for Personal Use.
-- View, copy, and study the Source Code.
+- View, copy, and study the Source Code for Personal Use.
 - Modify the Software for Personal Use.
 - Distribute the Software and Modified Versions free of charge, subject to Sections 3 through 6.
 
@@ -51,7 +52,9 @@ You may not:
 
 Hosting the Software on a free, publicly accessible platform (for example, a free code-hosting site) is not Commercial Use by You, even if that platform displays advertising You do not control or receive revenue from.
 
-If You are unsure whether a use is Commercial Use, it is treated as Commercial Use unless the Author confirms otherwise in writing.
+Any use that a reasonable person could consider Commercial Use is treated as Commercial Use unless the Author confirms otherwise in writing.
+
+No permission granted in this license may be used to do indirectly what this license prohibits directly, including by splitting the Software into separate parts, routing payment through another person or entity, or offering the Software free while charging for something that depends on it.
 
 Any Commercial Use requires a separate written license from the Author. These restrictions apply to the Software in both original and modified form, and to any part of it.
 
@@ -59,7 +62,7 @@ Any Commercial Use requires a separate written license from the Author. These re
 
 If You Distribute a Modified Version, You must:
 
-- Make the complete Source Code of the Modified Version available to every recipient, free of charge, either together with the Modified Version or through a publicly accessible link that remains available for as long as You Distribute the Modified Version.
+- Make the complete Source Code of the Modified Version, including any parts You wrote that are needed for it to run, available to every recipient and every person who interacts with it over a network, free of charge, either together with the Modified Version or through a publicly accessible link that remains available for as long as You Distribute the Modified Version.
 - License the Modified Version under this same license, with no other or additional terms.
 - Include prominent notices in the modified files stating that You changed them and the date of each change.
 - Preserve all copyright notices, license notices, and attribution notices from the Software.
@@ -90,7 +93,7 @@ If You voluntarily submit any code, content, or other material to the Author for
 
 Your rights under this license terminate automatically, without notice, if You violate any of its terms.
 
-If this is your first violation and You cure it within 30 days after You become aware of it or receive notice from the Author, whichever comes first, your rights are reinstated. Otherwise, reinstatement requires the Author's written permission.
+If this is your first violation, it did not involve Commercial Use, and You cure it within 30 days after You become aware of it or receive notice from the Author, whichever comes first, your rights are reinstated. Otherwise, reinstatement requires the Author's written permission.
 
 Upon termination, You must stop all use and distribution of the Software and all Modified Versions, and delete all copies in your possession or control. On the Author's request, You must confirm in writing that You have done so.
 
@@ -138,7 +141,7 @@ The Author may give You notice under this license by email to any address You ha
 
 ## 17. General Terms
 
-- Governing Law. This license is governed by the laws of the State of Florida, United States, and applicable U.S. federal law, without regard to conflict-of-laws rules. Any dispute shall be brought exclusively in the state or federal courts located in Lake County, Florida, and You consent to the personal jurisdiction of those courts.
+- Governing Law. This license is governed by the laws of the State of [STATE], United States, and applicable U.S. federal law, without regard to conflict-of-laws rules. Any dispute shall be brought exclusively in the state or federal courts located in [COUNTY, STATE], and You consent to the personal jurisdiction of those courts.
 - Severability. If any provision of this license is held unenforceable, it shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions remain in full effect.
 - No Waiver. The Author's failure or delay in enforcing any provision is not a waiver of the right to enforce it later, against You or anyone else.
 - Assignment. You may not assign or transfer this license. The Author may assign this license and any rights under it.
